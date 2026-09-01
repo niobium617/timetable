@@ -1,0 +1,54 @@
+{
+	"easycom": {
+		"autoscan": true,
+		"custom": {
+			"^u-(.*)": "uview-plus/components/u-$1/u-$1.vue"
+		}
+	},
+	"pages": [
+		{
+			"path": "pages/schedule/schedule",
+			"style": {
+				"navigationBarTitleText": "课表"
+			}
+		},
+		{
+			"path": "pages/calendar/calendar",
+			"style": {
+				"navigationBarTitleText": "日历"
+			}
+		},
+		{
+			"path": "pages/settings/settings",
+			"style": {
+				"navigationBarTitleText": "设置"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "课程表",
+		"navigationBarBackgroundColor": "#ffffff",
+		"backgroundColor": "#f6f7f9"
+	},
+	"tabBar": {
+		"color": "#909399",
+		"selectedColor": "#409eff",
+		"backgroundColor": "#ffffff",
+		"borderStyle": "black",
+		"list": [
+			{
+				"pagePath": "pages/schedule/schedule",
+				"text": "课表"
+			},
+			{
+				"pagePath": "pages/calendar/calendar",
+				"text": "日历"
+			},
+			{
+				"pagePath": "pages/settings/settings",
+				"text": "设置"
+			}
+		]
+	}
+}
