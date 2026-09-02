@@ -65,7 +65,7 @@
  */
 import { ref, computed } from 'vue';
 import { useData } from '../../store/useData.js';
-import { getWeekInfo } from '../../utils/week.js';
+import { getDisplayWeekInfo } from '../../utils/week.js';
 import { todayStr, parseDate } from '../../utils/time.js';
 import monthCal from '../../components/monthCal/monthCal.vue';
 import daySheet from '../../components/daySheet/daySheet.vue';
@@ -102,8 +102,8 @@ function backToToday() {
 	viewMonth.value = today.getMonth() + 1;
 }
 
-/** 顶部：今天的教学周信息（跟随 config 实时变化） */
-const todayWeek = computed(() => getWeekInfo(todayStr(), data.config));
+/** 顶部：今天的教学周信息（跟随 config 实时变化；展示时周号下限为 1） */
+const todayWeek = computed(() => getDisplayWeekInfo(todayStr(), data.config));
 
 /* ==================== 当日弹窗 ==================== */
 

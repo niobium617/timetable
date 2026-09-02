@@ -48,6 +48,18 @@ export function getWeekDates(weekNum, termStartDate) {
 	return Array.from({ length: 7 }, (_, i) => formatDate(addDays(monday, i)));
 }
 
+/**
+ * 展示用周信息：学期开始前（周号 ≤ 0）按第 1 周展示，单双周按钳制后的周号计算。
+ * 仅用于界面展示；过滤链仍用 getWeekInfo 的原始周号（不改变渲染规则）。
+ */
+export function getDisplayWeekInfo(dateStr, config) {
+	const info = getWeekInfo(dateStr, config);
+	const weekNum = Math.max(1, info.weekNum);
+	const firstWeekType = (config && config.firstWeekType) || 'odd';
+	const isOddWeek = (weekNum % 2 === 1) === (firstWeekType === 'odd');
+	return { ...info, weekNum, isOddWeek };
+}
+
 /** 判断某字符串是否为合法的周规则（用于表单校验提示） */
 export function isValidWeeksPattern(pattern) {
 	const p = String(pattern == null ? '' : pattern).trim();

@@ -79,9 +79,17 @@ defineEmits(['close', 'courseClick']);
 
 const { data } = useData();
 
-const status = computed(() =>
-	getDateStatus(props.date, data)
-);
+/** 当天状态；展示用周号下限为 1（学期开始前不出现"第 0 周/负数周"），单双周随之计算 */
+const status = computed(() => {
+	const s = getDateStatus(props.date, data);
+	const weekNum = Math.max(1, s.weekNum);
+	const firstWeekType = data.config.firstWeekType || 'odd';
+	return {
+		...s,
+		weekNum,
+		isOddWeek: (weekNum % 2 === 1) === (firstWeekType === 'odd'),
+	};
+});
 
 const headerText = computed(() => {
 	if (!props.date) return '';

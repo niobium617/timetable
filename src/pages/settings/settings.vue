@@ -251,7 +251,7 @@
 import { ref, reactive, computed } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import { useData } from '../../store/useData.js';
-import { getWeekInfo } from '../../utils/week.js';
+import { getDisplayWeekInfo } from '../../utils/week.js';
 import { WEEKDAY_NAMES, parseDate, formatDate, addDays, todayStr, diffDays } from '../../utils/time.js';
 
 // 每次进入页面时同步本地草稿（如导入/重置后返回）
@@ -310,8 +310,8 @@ function saveConfig() {
 	});
 }
 
-/** 今天的教学周（自动计算展示） */
-const todayWeek = computed(() => getWeekInfo(todayStr(), data.config));
+/** 今天的教学周（自动计算展示；展示时周号下限为 1） */
+const todayWeek = computed(() => getDisplayWeekInfo(todayStr(), data.config));
 
 /* ---------- 学期起始日（必须为周一） ---------- */
 function onTermStartChange(e) {
