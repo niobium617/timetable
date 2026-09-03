@@ -10,6 +10,7 @@
  */
 
 import { isValidWeeksPattern } from './week.js';
+import { intersectWeeksRange } from './weeksPattern.js';
 
 /** 规格要求的统一解析接口 */
 export const Parser = { parse: parseTimetable };
@@ -132,13 +133,17 @@ function normalizeSections(raw, warnings) {
 }
 
 /**
- * 周次规则归一化：容忍 "1-16周"、"1~16周" 等写法；非法规则回退 'all' 并警告
+ * 周次规则归一化：容忍 "1-16周"、"1~16周"、"1-16双周" 等写法；非法规则回退 'all' 并警告
  * @returns {string} 'all' | 'odd' | 'even' | '1-16' | '2,4,6,8' | '2-8,10-14'
  */
 function normalizeWeeks(weeks, courseName, warnings) {
 	let w = String(weeks == null || weeks === '' ? 'all' : weeks).trim();
-	// 剥离尾随"周"字（仅对区间/列表形式，关键词"单周/双周/每周"不动）
-	if (/周$/.test(w) && !['单周', '双周', '每周'].includes(w)) {
+	// "1-16双周"/"1-16单周" → 物化为显式周次列表（如 "2,4,6,...,16"）
+	const pr = w.match(/^(\d+)\s*[-~—]\s*(\d+)\s*(单周|双周)$/);
+	if (pr) {
+		w = intersectWeeksRange(pr[3] === '单周' ? 'odd' : 'even', Number(pr[1]), Number(pr[2]));
+	} else if (/周$/.test(w) && !['单周', '双周', '每周'].includes(w)) {
+		// 剥离尾随"周"字（仅对区间/列表形式，关键词"单周/双周/每周"不动）
 		w = w.replace(/周/g, '').trim();
 	}
 	if (isValidWeeksPattern(w)) return w;

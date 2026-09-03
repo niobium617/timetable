@@ -133,6 +133,20 @@
 							{{ opt.label }}
 						</view>
 					</view>
+					<!-- 单双周限定范围（如「1-16 双周」） -->
+					<view v-if="form.weekType === 'odd' || form.weekType === 'even'" class="custom-weeks">
+						<view class="range-pickers">
+							<picker mode="selector" :range="weekOptions" :value="form.parityStart - 1" @change="onParityStartChange">
+								<view class="date-box">第 {{ form.parityStart }} 周</view>
+							</picker>
+							<text class="range-sep">至</text>
+							<picker mode="selector" :range="weekOptions" :value="form.parityEnd - 1" @change="onParityEndChange">
+								<view class="date-box">第 {{ form.parityEnd }} 周</view>
+							</picker>
+						</view>
+						<text class="pattern-preview">{{ parityPreview }}</text>
+					</view>
+
 					<view v-if="form.weekType === 'custom'" class="custom-weeks">
 						<input class="form-input" v-model="form.customPattern" placeholder="如 1-16 或 2-8,10-14" placeholder-class="ph" />
 						<text v-if="patternPreview" class="pattern-preview">{{ patternPreview }}</text>
@@ -167,7 +181,7 @@
  */
 import { ref, reactive, watch, computed } from 'vue';
 import { WEEKDAY_NAMES, todayStr } from '../../utils/time.js';
-import { describeWeeks, parseWeeksPattern, intersectWeeksRange } from '../../utils/weeksPattern.js';
+import { describeWeeks, parseWeeksPattern, intersectWeeksRange, matchParityRange } from '../../utils/weeksPattern.js';
 
 const props = defineProps({
 	show: { type: Boolean, default: false },
@@ -213,6 +227,9 @@ const form = reactive({
 	onceDate: '',
 	rangeStart: 1,
 	rangeEnd: 20,
+	/** 单双周的限定周范围（如「1-16 双周」：双周 ∩ 1-16） */
+	parityStart: 1,
+	parityEnd: 20,
 	/** 原课程是否一次性课（编辑既有一次性课时保留 date/overrideId） */
 	originalDate: null,
 	originalOverrideId: null,
@@ -257,6 +274,10 @@ function initForm() {
 	form.rangeStart = 1;
 	form.rangeEnd = props.maxWeek;
 
+	// 单双周限定范围（如「1-16 双周」保存为显式列表后可逆向映射回来）
+	form.parityStart = 1;
+	form.parityEnd = props.maxWeek;
+
 	if (c && c.weeks) {
 		const p = c.weeks;
 		if (p === 'odd' || p === 'even') {
@@ -266,14 +287,41 @@ function initForm() {
 			form.weekType = 'all';
 			form.customPattern = '1-16';
 		} else {
-			form.weekType = 'custom';
-			form.customPattern = p;
+			const pr = matchParityRange(p);
+			if (pr) {
+				form.weekType = pr.parity;
+				form.parityStart = pr.start;
+				form.parityEnd = pr.end;
+				form.customPattern = '1-16';
+			} else {
+				form.weekType = 'custom';
+				form.customPattern = p;
+			}
 		}
 	} else {
 		form.weekType = 'all';
 		form.customPattern = '1-16';
 	}
 }
+
+function onParityStartChange(e) {
+	const v = Number(e.detail.value) + 1;
+	form.parityStart = v;
+	if (form.parityEnd < v) form.parityEnd = v;
+}
+
+function onParityEndChange(e) {
+	const v = Number(e.detail.value) + 1;
+	form.parityEnd = Math.max(v, form.parityStart);
+}
+
+/** 单双周限定范围的实时预览 */
+const parityPreview = computed(() => {
+	if (form.weekType !== 'odd' && form.weekType !== 'even') return '';
+	if (form.parityStart === 1 && form.parityEnd >= props.maxWeek) return '全部' + (form.weekType === 'odd' ? '单周' : '双周');
+	const merged = intersectWeeksRange(form.weekType, form.parityStart, form.parityEnd);
+	return merged ? describeWeeks(merged) : '所选范围内无' + (form.weekType === 'odd' ? '单周' : '双周');
+});
 
 function onScopeChange(scope) {
 	form.scope = scope;
@@ -370,6 +418,11 @@ function onSave() {
 				return;
 			}
 			weeks = p;
+		} else if (form.weekType === 'odd' || form.weekType === 'even') {
+			// 单双周限定范围（如「1-16 双周」）：范围被收窄时物化为显式周次列表
+			if (form.parityStart > 1 || form.parityEnd < props.maxWeek) {
+				weeks = intersectWeeksRange(form.weekType, form.parityStart, form.parityEnd);
+			}
 		}
 	}
 

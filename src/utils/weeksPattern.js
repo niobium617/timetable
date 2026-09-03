@@ -146,3 +146,20 @@ export function subtractWeeksRange(pattern, a, b, maxWeek = 20) {
 	for (let w = lo; w <= hi; w++) set.delete(w);
 	return compressWeeks(set);
 }
+
+/**
+ * 显式连续奇偶列表 → 单双周 + 范围（编辑弹窗逆向映射，如 "2,4,6,8" → even ∩ [2,8]）
+ * 不满足"同奇偶、步长 2、无间断"则返回 null
+ * @returns {{ parity: 'odd'|'even', start: number, end: number } | null}
+ */
+export function matchParityRange(pattern) {
+	const { type, weeks } = parseWeeksPattern(pattern);
+	if (type !== 'range') return null;
+	const list = [...weeks].sort((a, b) => a - b);
+	if (list.length === 0) return null;
+	const parity = list[0] % 2;
+	for (let i = 0; i < list.length; i++) {
+		if (list[i] % 2 !== parity || list[i] !== list[0] + i * 2) return null;
+	}
+	return { parity: parity === 1 ? 'odd' : 'even', start: list[0], end: list[list.length - 1] };
+}

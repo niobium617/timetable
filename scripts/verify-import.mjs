@@ -13,7 +13,7 @@ import { parseTimetable, Parser } from '../src/utils/parser.js';
 import { matchIncremental, mergeCourses, findConflicts } from '../src/utils/importMatch.js';
 import { suggestAdjustWeekday } from '../src/utils/holiday.js';
 import { getCoursesOfDate } from '../src/utils/filter.js';
-import { intersectWeeksRange, subtractWeeksRange } from '../src/utils/weeksPattern.js';
+import { intersectWeeksRange, subtractWeeksRange, matchParityRange } from '../src/utils/weeksPattern.js';
 import { OFFICIAL_HOLIDAYS, OFFICIAL_ADJUSTMENTS, getOfficialYears } from '../src/utils/officialHolidays.js';
 import { getWeekday } from '../src/utils/time.js';
 
@@ -202,6 +202,19 @@ assert(subtractWeeksRange('all', 1, 4, 16) === '5-16', 'all − [1,4]（maxWeek=
 assert(subtractWeeksRange('odd', 1, 4, 10) === '5,7,9', 'odd − [1,4]（maxWeek=10）= 5,7,9');
 assert(subtractWeeksRange('even', 1, 4, 8) === '6,8', 'even − [1,4]（maxWeek=8）= 6,8');
 assert(subtractWeeksRange('1-4', 1, 4) === null, '减完为空 → null');
+
+console.log('== 单双周限定范围（如「1-16 双周」）==');
+const pParity = parseTimetable('{"courses":[{"name":"思政课","weekday":3,"startSection":7,"endSection":8,"weeks":"1-16双周"}]}');
+assert(pParity.courses[0]?.weeks === '2,4,6,8,10,12,14,16', `1-16双周 物化（实际 ${pParity.courses[0]?.weeks}）`);
+const pParity2 = parseTimetable('{"courses":[{"name":"体育课","weekday":5,"startSection":5,"endSection":6,"weeks":"5-8单周"}]}');
+assert(pParity2.courses[0]?.weeks === '5,7', `5-8单周 物化（实际 ${pParity2.courses[0]?.weeks}）`);
+const mpr1 = matchParityRange('2,4,6,8');
+assert(mpr1 && mpr1.parity === 'even' && mpr1.start === 2 && mpr1.end === 8, '逆向映射：2,4,6,8 → even 2-8');
+const mpr2 = matchParityRange('1,3,5');
+assert(mpr2 && mpr2.parity === 'odd' && mpr2.start === 1 && mpr2.end === 5, '逆向映射：1,3,5 → odd 1-5');
+assert(matchParityRange('1,3,6') === null, '非连续奇偶 → null');
+assert(matchParityRange('odd') === null, 'odd 关键字 → null');
+assert(matchParityRange('2-8,10-14') === null, '多段 → null');
 
 console.log('== suggestAdjustWeekday ==');
 const holidays = [{ date: '2026-10-01' }, { date: '2026-10-02' }, { date: '2026-10-03' }];
