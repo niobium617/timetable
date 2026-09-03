@@ -9,6 +9,26 @@
 			</view>
 
 			<scroll-view scroll-y class="edit-body">
+				<!-- 课程完整信息（只读展示，长文本完整换行，可随弹窗滚动查看） -->
+				<view v-if="isEdit" class="course-brief">
+					<view v-if="form.name" class="brief-row">
+						<text class="brief-label">课程</text>
+						<text class="brief-text">{{ form.name }}</text>
+					</view>
+					<view v-if="form.teacher" class="brief-row">
+						<text class="brief-label">教师</text>
+						<text class="brief-text">{{ form.teacher }}</text>
+					</view>
+					<view v-if="form.classroom" class="brief-row">
+						<text class="brief-label">教室</text>
+						<text class="brief-text">{{ form.classroom }}</text>
+					</view>
+					<view v-if="form.remark" class="brief-row">
+						<text class="brief-label">备注</text>
+						<text class="brief-text">{{ form.remark }}</text>
+					</view>
+				</view>
+
 				<!-- 课程名称 -->
 				<view class="form-row">
 					<text class="form-label">课程名称</text>
@@ -302,6 +322,38 @@ function onDelete() {
 	padding: 0 32rpx;
 	max-height: 56vh;
 	box-sizing: border-box;
+}
+
+/* 课程完整信息只读展示（长文本完整换行） */
+.course-brief {
+	margin-top: 8rpx;
+	background: #f5f7fa;
+	border-radius: 12rpx;
+	padding: 16rpx 20rpx;
+	display: flex;
+	flex-direction: column;
+	gap: 8rpx;
+
+	.brief-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 12rpx;
+	}
+
+	.brief-label {
+		flex-shrink: 0;
+		font-size: 22rpx;
+		color: #909399;
+		line-height: 1.5;
+	}
+
+	.brief-text {
+		flex: 1;
+		font-size: 26rpx;
+		color: #303133;
+		line-height: 1.5;
+		word-break: break-all;
+	}
 }
 
 .form-row {
