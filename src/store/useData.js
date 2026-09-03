@@ -18,6 +18,7 @@ import {
 } from './index.js';
 import { mergeCourses } from '../utils/importMatch.js';
 import { isValidWeeksPattern } from '../utils/week.js';
+import { OFFICIAL_HOLIDAYS, getOfficialYears } from '../utils/officialHolidays.js';
 
 /** 导入课程自动配色（与 courseEdit 的 COURSE_COLORS 保持一致的色系） */
 const IMPORT_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#8e44ad', '#16a085', '#e84393', '#3498db', '#9c6b3c', '#909399'];
@@ -98,10 +99,11 @@ function normalizeImported(c, index) {
  * - replace：以解析结果替换全部课程（config/假期/调休保留）
  * - merge：按 sourceKey / 名称+星期+开始节次 增量匹配（更新保留本地 id/color/remark）
  * 导入前自动备份当前数据（设置页「撤销导入」可恢复），单次持久化。
+ * 导入时自动补齐官方假期（去重追加，官方调休上班日不自动加）。
  * @param {Array} list 解析出的课程
  * @param {'replace'|'merge'} mode
  * @param {{ sections?: Array }} options 可选：同时应用解析出的节次时间表
- * @returns {{ ok: boolean, added: number, updated: number, error?: string }}
+ * @returns {{ ok: boolean, added: number, updated: number, holidaysAdded?: number, error?: string }}
  */
 export function importCourses(list, mode, options = {}) {
 	let nextCourses;
@@ -116,8 +118,13 @@ export function importCourses(list, mode, options = {}) {
 		const m = mergeCourses(list, data.courses);
 		added = m.add.length;
 		updated = m.update.length;
-		if (added === 0 && updated === 0 && !applySections) {
-			return { ok: true, added: 0, updated: 0 }; // 无变更，不触碰存储
+		// 官方假期缺失时也继续执行（导入时自动补齐）
+		const missingHolidays = getOfficialYears().reduce(
+			(n, y) => n + (OFFICIAL_HOLIDAYS[y] || []).filter((h) => !data.holidays.some((x) => x.date === h.date)).length,
+			0
+		);
+		if (added === 0 && updated === 0 && !applySections && missingHolidays === 0) {
+			return { ok: true, added: 0, updated: 0, holidaysAdded: 0 }; // 无变更，不触碰存储
 		}
 		// 仅归一化新增课程（无 id）；已存在课程保持原对象（更新已由 mergeCourses 合并语义字段）
 		let colorIdx = 0;
@@ -133,8 +140,18 @@ export function importCourses(list, mode, options = {}) {
 	if (applySections) {
 		data.config.sections = options.sections;
 	}
+	// 自动补齐官方假期（日期为事实数据，去重后追加；调休上班日不自动加，补星期官方未定义）
+	let holidaysAdded = 0;
+	getOfficialYears().forEach((y) => {
+		(OFFICIAL_HOLIDAYS[y] || []).forEach((h) => {
+			if (!data.holidays.some((x) => x.date === h.date)) {
+				data.holidays.push({ ...h });
+				holidaysAdded++;
+			}
+		});
+	});
 	const ok = saveData(data); // 失败时 saveData 已提示；备份仍在，可撤销
-	return { ok, added, updated, error: ok ? undefined : '写入存储失败' };
+	return { ok, added, updated, holidaysAdded, error: ok ? undefined : '写入存储失败' };
 }
 
 /* ==================== 假期 / 调休 ==================== */

@@ -164,8 +164,8 @@ const inputWarnings = ref([]);
 const mode = ref('merge');
 /** 被勾选排除的课程：key = `${组名}${下标}` */
 const excluded = reactive({});
-/** 是否同时应用解析出的节次时间表 */
-const applySections = ref(false);
+/** 是否同时应用解析出的节次时间表（默认勾选，AI 返回了时间即可直接生效） */
+const applySections = ref(true);
 
 const groupTitle = { add: '新增', update: '更新', unchanged: '不变' };
 
@@ -179,7 +179,7 @@ function onParse() {
 	const r = parseTimetable(source.value);
 	result.value = r;
 	Object.keys(excluded).forEach((k) => delete excluded[k]);
-	applySections.value = false;
+	applySections.value = true;
 	if (r.courses.length === 0) {
 		inputWarnings.value = r.warnings;
 		preview.value = false;
@@ -325,8 +325,8 @@ function onConfirm() {
 	uni.showModal({
 		title: isMerge ? '增量导入' : '覆盖导入',
 		content: isMerge
-			? `将新增/更新 ${incoming.length} 门课程（其余课程保留）${useSections ? '，并应用课表中的节次时间表' : ''}。导入前自动备份，可在设置页「撤销导入」。`
-			: `将以解析结果替换全部课程（当前 ${data.courses.length} 门将被移除；学期配置、假期、调休保留）${useSections ? '，并应用课表中的节次时间表' : ''}。导入前自动备份，可在设置页「撤销导入」。`,
+			? `将新增/更新 ${incoming.length} 门课程（其余课程保留）${useSections ? '，并应用课表中的节次时间表' : ''}，自动补齐官方假期。导入前自动备份，可在设置页「撤销导入」。`
+			: `将以解析结果替换全部课程（当前 ${data.courses.length} 门将被移除；学期配置、假期、调休保留）${useSections ? '，并应用课表中的节次时间表' : ''}，自动补齐官方假期。导入前自动备份，可在设置页「撤销导入」。`,
 		confirmColor: isMerge ? '#409eff' : '#f56c6c',
 		success: (res) => {
 			if (!res.confirm) return;
@@ -337,8 +337,9 @@ function onConfirm() {
 				uni.showToast({ title: r.error || '导入失败', icon: 'none', duration: 2500 });
 				return;
 			}
-			uni.showToast({ title: `导入成功：新增${r.added} 更新${r.updated}`, icon: 'success' });
-			setTimeout(() => uni.navigateBack(), 800);
+			const extra = r.holidaysAdded > 0 ? `，自动补齐假期 ${r.holidaysAdded} 天` : '';
+			uni.showToast({ title: `导入成功：新增${r.added} 更新${r.updated}${extra}`, icon: 'success', duration: 2500 });
+			setTimeout(() => uni.navigateBack(), 900);
 		},
 	});
 }

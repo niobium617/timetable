@@ -59,6 +59,8 @@ assert(r.sections[9].section === 10 && r.sections[9].endTime === '20:30', '第 1
 assert(r.sections.every((s, i) => i === 0 || s.section > r.sections[i - 1].section), '按节次排序且无重复');
 assert(r.warnings.some((w) => w.includes('sections')), '非法 section 项有警告');
 assert(parseTimetable('{"courses":[]}').sections.length === 0, '无 sections 字段 → 空数组');
+const noSec = parseTimetable('{"courses":[{"name":"测试课","weekday":1,"startSection":1,"endSection":2,"weeks":"all"}]}');
+assert(noSec.courses.length === 1 && noSec.warnings.some((w) => w.includes('未识别到节次时间')), '缺 sections → 有明确提示');
 
 console.log('== parseTimetable 边界 ==');
 assert(parseTimetable('').courses.length === 0 && parseTimetable('').warnings.length > 0, '空输入 → 空结果+警告');

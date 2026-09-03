@@ -92,6 +92,10 @@ export function parseTimetable(source) {
 	if (result.courses.length === 0 && result.warnings.length === 0) {
 		result.warnings.push('未解析到课程');
 	}
+	// 课程解析成功但缺节次时间：提示用户确认截图是否包含时间表区域
+	if (result.courses.length > 0 && result.sections.length === 0) {
+		result.warnings.push('未识别到节次时间：如课表标注了节次起止时间，请确认截图包含时间表区域后重试');
+	}
 	return result;
 }
 
