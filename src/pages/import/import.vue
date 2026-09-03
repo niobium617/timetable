@@ -1,0 +1,590 @@
+<template>
+	<view class="import-page">
+		<!-- ============ 输入态 ============ -->
+		<template v-if="!preview">
+			<!-- 多模态 AI 识别说明 -->
+			<view class="tt-card">
+				<view class="tt-card-title">多模态 AI 识别（推荐）</view>
+				<view class="ai-steps">
+					<text>1. 点「复制提示词」</text>
+					<text>2. 给课表截图，与提示词一起发给 ChatGPT / Claude 等多模态 AI</text>
+					<text>3. 把 AI 返回的 JSON 粘贴到下方输入框，点「解析课表」</text>
+				</view>
+				<scroll-view scroll-y class="prompt-box">
+					<text class="prompt-text">{{ AI_PROMPT }}</text>
+				</scroll-view>
+				<view class="prompt-actions">
+					<view class="btn-mini btn-plain" @click="onCopyPrompt">复制提示词</view>
+				</view>
+				<view class="form-tip">提示：课表截图会发送给第三方 AI，介意请勿使用此方式</view>
+			</view>
+
+			<!-- 粘贴 JSON -->
+			<view class="tt-card">
+				<view class="tt-card-title">粘贴 AI 返回的 JSON</view>
+				<textarea
+					class="paste-area"
+					v-model="source"
+					:maxlength="200000"
+					placeholder="将 AI 返回的 JSON 粘贴到这里（可包含 ```json 代码块）"
+					placeholder-class="ph"
+				></textarea>
+				<view class="form-tip">纯本地解析，解析结果不会上传</view>
+				<view class="parse-actions">
+					<view class="btn-mini btn-primary" :class="{ disabled: !source.trim() }" @click="onParse">解析课表</view>
+				</view>
+			</view>
+
+			<!-- 输入态解析提示 -->
+			<view v-if="inputWarnings.length" class="tt-card warn-card">
+				<view class="tt-card-title">解析提示（{{ inputWarnings.length }}）</view>
+				<view v-for="(w, i) in inputWarnings" :key="i" class="warn-row">
+					<u-icon name="warning" size="14" color="#e6a23c"></u-icon>
+					<text class="warn-text">{{ w }}</text>
+				</view>
+			</view>
+		</template>
+
+		<!-- ============ 预览态 ============ -->
+		<template v-else>
+			<!-- 模式切换 -->
+			<view class="tt-card">
+				<view class="tt-card-title">导入预览</view>
+				<view class="chip-row">
+					<view class="chip" :class="{ active: mode === 'merge' }" @click="onToggleMode('merge')">增量导入</view>
+					<view class="chip" :class="{ active: mode === 'replace' }" @click="onToggleMode('replace')">覆盖导入</view>
+				</view>
+				<view class="form-tip">{{ modeTip }}</view>
+				<view class="stats-line">
+					共解析 {{ result.courses.length }} 门：新增 {{ groups.add.length }} · 更新 {{ groups.update.length }} · 不变 {{ groups.unchanged.length }}
+				</view>
+			</view>
+
+			<!-- 解析警告 -->
+			<view v-if="result.warnings.length" class="tt-card warn-card">
+				<view class="tt-card-title">解析提示（{{ result.warnings.length }}）</view>
+				<view v-for="(w, i) in result.warnings" :key="i" class="warn-row">
+					<u-icon name="warning" size="14" color="#e6a23c"></u-icon>
+					<text class="warn-text">{{ w }}</text>
+				</view>
+			</view>
+
+			<!-- 三组列表 -->
+			<view v-for="grp in ['add', 'update', 'unchanged']" :key="grp" class="tt-card" v-show="groups[grp].length">
+				<view class="tt-card-title">
+					<text class="grp-chip" :class="'grp-' + grp">{{ groupTitle[grp] }}</text>
+					<text class="grp-count">{{ groups[grp].length }}</text>
+				</view>
+
+				<view
+					v-for="(row, idx) in groups[grp]"
+					:key="grp + idx"
+					class="course-row"
+					:class="{ 'row-conflict': isConflict(grp, idx) }"
+				>
+					<!-- 勾选框（不变组为被动成员，不可勾选） -->
+					<view
+						v-if="grp !== 'unchanged'"
+						class="row-check"
+						:class="{ checked: !isExcluded(grp, idx) }"
+						@click="toggleExclude(grp, idx)"
+					>
+						<text v-if="!isExcluded(grp, idx)">✓</text>
+					</view>
+					<view class="row-main">
+						<view class="row-name-line">
+							<view class="color-dot" :style="{ backgroundColor: rowColor(grp, row) }"></view>
+							<text class="row-name">{{ rowName(grp, row) }}</text>
+							<text v-if="isConflict(grp, idx)" class="badge-conflict">冲突</text>
+						</view>
+						<text class="row-sub">{{ rowInfo(grp, row) }}</text>
+						<text v-if="grp === 'update'" class="row-diff">变更：{{ rowDiff(row) }}</text>
+					</view>
+				</view>
+			</view>
+
+			<!-- 底部操作 -->
+			<view class="footer-bar">
+				<view class="btn btn-plain" @click="onBack">取消</view>
+				<view class="btn btn-primary" :class="{ disabled: !canConfirm }" @click="onConfirm">确认导入</view>
+			</view>
+		</template>
+	</view>
+</template>
+
+<script setup>
+/**
+ * import.vue —— P3 模式B 导入页（多模态 AI 识别路径）
+ *
+ * 流程：复制提示词 → 截图发给 AI → 粘贴 AI 返回的 JSON → 解析预览 →
+ * 三组（新增/更新/不变）+ 冲突标红 + 勾选排除 → 增量/覆盖导入。
+ * 导入前自动备份（设置页可撤销）；解析纯函数见 utils/parser.js。
+ */
+import { ref, reactive, computed } from 'vue';
+import { useData } from '../../store/useData.js';
+import { parseTimetable } from '../../utils/parser.js';
+import { matchIncremental, findConflicts, courseKey } from '../../utils/importMatch.js';
+import { WEEKDAY_NAMES } from '../../utils/time.js';
+import { describeWeeks } from '../../utils/weeksPattern.js';
+
+const { data, importCourses } = useData();
+
+/** 标准提示词（通用，不含任何学校信息） */
+const AI_PROMPT =
+	'请识别这张课表图片，输出严格的 JSON（不要任何解释文字）：\n' +
+	'{"courses":[{"name":"课程名","teacher":"教师","classroom":"教室","weekday":1,"startSection":1,"endSection":2,"weeks":"1-16"}]}\n\n' +
+	'规则：\n' +
+	'1. weekday 用数字：1=周一，2=周二，3=周三，4=周四，5=周五，6=周六，7=周日\n' +
+	'2. 节次用小节编号；若课表按"大节"标注（如第一大节=第01-02小节），请换算：第一大节 startSection=1,endSection=2，第二大节 3-4，第三大节 5-6，第四大节 7-8，第五大节 9-10，以此类推\n' +
+	'3. weeks 取值："all" 每周；"odd" 单周；"even" 双周；区间如 "1-16"、"5-8"；不连续列表直接逗号分隔如 "2,4,6,8"；图片未标注周次用 "all"\n' +
+	'4. 同一门课同一节次在不同周次有不同教室（隔周轮换）时，拆成多条课程，分别写各自的 weeks 与 classroom\n' +
+	'5. 空白格忽略；教师/教室未标注用 ""；课程名保留括号内原文\n' +
+	'6. 只输出 JSON，可包在 ```json 代码块内';
+
+const source = ref('');
+const preview = ref(false);
+const result = ref(null); // parseTimetable 结果
+const inputWarnings = ref([]);
+const mode = ref('merge');
+/** 被勾选排除的课程：key = `${组名}${下标}` */
+const excluded = reactive({});
+
+const groupTitle = { add: '新增', update: '更新', unchanged: '不变' };
+
+/* ==================== 解析 ==================== */
+
+function onParse() {
+	if (!source.value.trim()) {
+		uni.showToast({ title: '请先粘贴 AI 返回的 JSON', icon: 'none' });
+		return;
+	}
+	const r = parseTimetable(source.value);
+	result.value = r;
+	Object.keys(excluded).forEach((k) => delete excluded[k]);
+	if (r.courses.length === 0) {
+		inputWarnings.value = r.warnings;
+		preview.value = false;
+		return;
+	}
+	inputWarnings.value = [];
+	preview.value = true;
+}
+
+function onCopyPrompt() {
+	uni.setClipboardData({
+		data: AI_PROMPT,
+		success: () => uni.showToast({ title: '提示词已复制', icon: 'success' }),
+	});
+}
+
+/* ==================== 预览分组 ==================== */
+
+const groups = computed(() => {
+	if (!result.value) return { add: [], update: [], unchanged: [] };
+	if (mode.value === 'replace') {
+		return { add: result.value.courses, update: [], unchanged: [] };
+	}
+	return matchIncremental(result.value.courses, data.courses);
+});
+
+const modeTip = computed(() =>
+	mode.value === 'merge'
+		? '增量导入：与现有课程按「名称+星期+开始节次」匹配，命中更新、未命中新增，其余课程保留'
+		: '覆盖导入：用勾选的解析结果替换全部课程（学期配置、假期、调休保留）'
+);
+
+/* ==================== 勾选与冲突 ==================== */
+
+const isExcluded = (grp, idx) => !!excluded[grp + idx];
+
+function toggleExclude(grp, idx) {
+	const key = grp + idx;
+	excluded[key] = !excluded[key];
+}
+
+/** 参与冲突检测的最终课程集（勾选排除后重算）：merge 含现有课程（排除被更新的旧版本），replace 仅勾选解析课程 */
+const conflictList = computed(() => {
+	if (!result.value) return [];
+	const incoming = [];
+	groups.value.add.forEach((c, idx) => {
+		if (!isExcluded('add', idx)) incoming.push(c);
+	});
+	groups.value.update.forEach((u, idx) => {
+		if (!isExcluded('update', idx)) incoming.push(u.parsed);
+	});
+	if (mode.value === 'merge') {
+		const updateIds = new Set(groups.value.update.map((u) => u.existing.id));
+		return [...data.courses.filter((c) => !updateIds.has(c.id)), ...incoming];
+	}
+	return incoming;
+});
+
+const conflictGroups = computed(() => findConflicts(conflictList.value));
+
+/** 该行代表课程是否在某个冲突组中（按对象同一性） */
+function isConflict(grp, idx) {
+	const row = groups.value[grp][idx];
+	if (!row) return false;
+	const obj = grp === 'unchanged' ? row.existing : grp === 'update' ? row.parsed : row;
+	return conflictGroups.value.some((g) => g.includes(obj));
+}
+
+/* ==================== 行展示 ==================== */
+
+/** 行代表课程对象：add 组的行即课程本身；update/unchanged 组为 {parsed, existing} */
+const rowCourse = (grp, row) => (grp === 'add' ? row : grp === 'unchanged' ? row.existing : row.parsed);
+const rowName = (grp, row) => rowCourse(grp, row).name;
+
+function rowInfo(grp, row) {
+	const c = rowCourse(grp, row);
+	return `${WEEKDAY_NAMES[c.weekday - 1]} 第${c.startSection}-${c.endSection}节 · ${c.teacher || '无教师'} · ${c.classroom || '无教室'} · ${describeWeeks(c.weeks)}`;
+}
+
+function rowColor(grp, row) {
+	return rowCourse(grp, row).color || '#409eff';
+}
+
+const FIELD_LABELS = { name: '名称', teacher: '教师', classroom: '教室', weekday: '星期', startSection: '节次', endSection: '节次', weeks: '周次' };
+
+function rowDiff(row) {
+	const labels = [];
+	if (row.parsed.name !== row.existing.name) labels.push(FIELD_LABELS.name);
+	if (row.parsed.teacher !== row.existing.teacher) labels.push(FIELD_LABELS.teacher);
+	if (row.parsed.classroom !== row.existing.classroom) labels.push(FIELD_LABELS.classroom);
+	if (row.parsed.weekday !== row.existing.weekday) labels.push(FIELD_LABELS.weekday);
+	if (row.parsed.startSection !== row.existing.startSection || row.parsed.endSection !== row.existing.endSection) labels.push(FIELD_LABELS.startSection);
+	if (row.parsed.weeks !== row.existing.weeks) labels.push(FIELD_LABELS.weeks);
+	return labels.join('、') || '无实质变更';
+}
+
+/* ==================== 提交 ==================== */
+
+const checkedCount = computed(() => {
+	let n = 0;
+	groups.value.add.forEach((_, idx) => { if (!isExcluded('add', idx)) n++; });
+	groups.value.update.forEach((_, idx) => { if (!isExcluded('update', idx)) n++; });
+	return n;
+});
+
+const canConfirm = computed(() => checkedCount.value > 0);
+
+function onToggleMode(m) {
+	if (mode.value === m) return;
+	mode.value = m;
+	Object.keys(excluded).forEach((k) => delete excluded[k]);
+}
+
+function onBack() {
+	preview.value = false;
+}
+
+function onConfirm() {
+	if (!canConfirm.value) return;
+	const incoming = [];
+	groups.value.add.forEach((c, idx) => {
+		if (!isExcluded('add', idx)) incoming.push(c);
+	});
+	groups.value.update.forEach((u, idx) => {
+		if (!isExcluded('update', idx)) incoming.push(u.parsed);
+	});
+	const isMerge = mode.value === 'merge';
+	uni.showModal({
+		title: isMerge ? '增量导入' : '覆盖导入',
+		content: isMerge
+			? `将新增/更新 ${incoming.length} 门课程（其余课程保留）。导入前自动备份，可在设置页「撤销导入」。`
+			: `将以解析结果替换全部课程（当前 ${data.courses.length} 门将被移除；学期配置、假期、调休保留）。导入前自动备份，可在设置页「撤销导入」。`,
+		confirmColor: isMerge ? '#409eff' : '#f56c6c',
+		success: (res) => {
+			if (!res.confirm) return;
+			const r = importCourses(incoming, mode.value);
+			if (!r.ok) {
+				uni.showToast({ title: r.error || '导入失败', icon: 'none', duration: 2500 });
+				return;
+			}
+			uni.showToast({ title: `导入成功：新增${r.added} 更新${r.updated}`, icon: 'success' });
+			setTimeout(() => uni.navigateBack(), 800);
+		},
+	});
+}
+</script>
+
+<style lang="scss" scoped>
+.import-page {
+	padding: 24rpx 24rpx 60rpx;
+}
+
+.ai-steps {
+	display: flex;
+	flex-direction: column;
+	gap: 8rpx;
+	font-size: 24rpx;
+	color: #606266;
+	line-height: 1.5;
+}
+
+.prompt-box {
+	margin-top: 20rpx;
+	height: 220rpx;
+	background: #f5f7fa;
+	border-radius: 12rpx;
+	padding: 20rpx;
+	box-sizing: border-box;
+
+	.prompt-text {
+		font-size: 22rpx;
+		color: #606266;
+		line-height: 1.5;
+		word-break: break-all;
+	}
+}
+
+.prompt-actions {
+	margin-top: 20rpx;
+}
+
+.parse-actions {
+	margin-top: 20rpx;
+	display: flex;
+
+	.btn-mini.disabled {
+		opacity: 0.5;
+	}
+}
+
+.paste-area {
+	width: 100%;
+	height: 320rpx;
+	background: #f5f7fa;
+	border-radius: 12rpx;
+	padding: 20rpx;
+	font-size: 22rpx;
+	color: #303133;
+	box-sizing: border-box;
+	line-height: 1.5;
+}
+
+.form-tip {
+	font-size: 22rpx;
+	color: #909399;
+	margin-top: 12rpx;
+	line-height: 1.5;
+}
+
+/* 小按钮（与设置页一致） */
+.btn-mini {
+	padding: 14rpx 32rpx;
+	border-radius: 34rpx;
+	font-size: 26rpx;
+	background: #f5f7fa;
+	color: #606266;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+
+	&:active {
+		opacity: 0.85;
+	}
+
+	&.btn-primary {
+		background: #409eff;
+		color: #ffffff;
+	}
+
+	&.btn-plain {
+		background: #ecf5ff;
+		color: #409eff;
+	}
+}
+
+/* 警告卡片 */
+.warn-card {
+	.warn-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 8rpx;
+		padding: 8rpx 0;
+
+		.warn-text {
+			font-size: 22rpx;
+			color: #e6a23c;
+			line-height: 1.5;
+			flex: 1;
+		}
+	}
+}
+
+/* 模式 chips */
+.chip-row {
+	display: flex;
+	gap: 16rpx;
+	margin-top: 16rpx;
+
+	.chip {
+		padding: 10rpx 32rpx;
+		border-radius: 34rpx;
+		background: #f5f7fa;
+		color: #606266;
+		font-size: 26rpx;
+
+		&.active {
+			background: #409eff;
+			color: #ffffff;
+		}
+	}
+}
+
+.stats-line {
+	margin-top: 16rpx;
+	font-size: 24rpx;
+	color: #303133;
+}
+
+/* 分组 */
+.grp-chip {
+	font-size: 26rpx;
+	font-weight: 600;
+	padding: 4rpx 20rpx;
+	border-radius: 24rpx;
+	color: #ffffff;
+}
+
+.grp-add {
+	background: #67c23a;
+}
+
+.grp-update {
+	background: #409eff;
+}
+
+.grp-unchanged {
+	background: #909399;
+}
+
+.grp-count {
+	margin-left: 12rpx;
+	font-size: 24rpx;
+	color: #909399;
+	font-weight: 400;
+}
+
+/* 课程行 */
+.course-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 16rpx;
+	padding: 20rpx 12rpx;
+	border-bottom: 1rpx solid #f5f7fa;
+	border-left: 6rpx solid transparent;
+
+	&.row-conflict {
+		border-left-color: #f56c6c;
+		background: #fef0f0;
+	}
+
+	.row-check {
+		width: 36rpx;
+		height: 36rpx;
+		border-radius: 50%;
+		border: 2rpx solid #dcdfe6;
+		background: #ffffff;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		margin-top: 4rpx;
+
+		text {
+			font-size: 24rpx;
+			color: #ffffff;
+		}
+
+		&.checked {
+			background: #409eff;
+			border-color: #409eff;
+		}
+	}
+
+	.row-main {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.row-name-line {
+		display: flex;
+		align-items: center;
+		gap: 10rpx;
+
+		.color-dot {
+			width: 16rpx;
+			height: 16rpx;
+			border-radius: 50%;
+			flex-shrink: 0;
+		}
+
+		.row-name {
+			font-size: 28rpx;
+			font-weight: 600;
+			color: #303133;
+		}
+
+		.badge-conflict {
+			font-size: 20rpx;
+			color: #ffffff;
+			background: #f56c6c;
+			border-radius: 6rpx;
+			padding: 2rpx 12rpx;
+		}
+	}
+
+	.row-sub {
+		display: block;
+		margin-top: 8rpx;
+		font-size: 22rpx;
+		color: #909399;
+		line-height: 1.5;
+	}
+
+	.row-diff {
+		display: block;
+		margin-top: 6rpx;
+		font-size: 22rpx;
+		color: #e6a23c;
+	}
+}
+
+/* 底部操作栏 */
+.footer-bar {
+	display: flex;
+	gap: 20rpx;
+	margin-top: 32rpx;
+
+	.btn {
+		flex: 1;
+		height: 84rpx;
+		border-radius: 42rpx;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 28rpx;
+		font-weight: 600;
+
+		&.btn-primary {
+			background: #409eff;
+			color: #ffffff;
+		}
+
+		&.btn-plain {
+			background: #f5f7fa;
+			color: #606266;
+		}
+
+		&.disabled {
+			opacity: 0.5;
+		}
+	}
+}
+
+.ph {
+	color: #c0c4cc;
+}
+</style>

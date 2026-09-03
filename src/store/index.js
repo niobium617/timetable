@@ -164,9 +164,7 @@ export function importJSON(jsonStr, currentData) {
 	}
 
 	// 恢复前自动备份当前数据，供撤销
-	try {
-		uni.setStorageSync(BACKUP_KEY, currentData);
-	} catch (e) {
+	if (!backupCurrent(currentData)) {
 		return { ok: false, error: '自动备份失败，已中止导入' };
 	}
 
@@ -175,6 +173,16 @@ export function importJSON(jsonStr, currentData) {
 		return { ok: false, error: '写入存储失败' };
 	}
 	return { ok: true };
+}
+
+/** 写入单槽备份（导入/覆盖/重置前调用）；失败返回 false 由调用方中止 */
+export function backupCurrent(currentData) {
+	try {
+		uni.setStorageSync(BACKUP_KEY, currentData);
+		return true;
+	} catch (e) {
+		return false;
+	}
 }
 
 /** 撤销最近一次导入/恢复（用备份覆盖主数据） */
@@ -197,11 +205,7 @@ export function restoreBackup() {
 
 /** 清空数据并重置为示例数据（设置页"恢复示例"用，先自动备份） */
 export function resetToSample(currentData) {
-	try {
-		uni.setStorageSync(BACKUP_KEY, currentData);
-	} catch (e) {
-		/* 备份失败不阻断重置 */
-	}
+	backupCurrent(currentData); // 备份失败不阻断重置
 	saveData(sampleData());
 	uni.showToast({ title: '已重置为示例数据', icon: 'success' });
 	return true;

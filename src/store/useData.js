@@ -14,7 +14,13 @@ import {
 	importJSON,
 	restoreBackup,
 	resetToSample,
+	backupCurrent,
 } from './index.js';
+import { mergeCourses } from '../utils/importMatch.js';
+import { isValidWeeksPattern } from '../utils/week.js';
+
+/** 导入课程自动配色（与 courseEdit 的 COURSE_COLORS 保持一致的色系） */
+const IMPORT_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#8e44ad', '#16a085', '#e84393', '#3498db', '#9c6b3c', '#909399'];
 
 // 全局单例：应用启动后只加载一次，页面间共享
 const data = reactive(loadData());
@@ -60,6 +66,70 @@ export function copyCourse(id) {
 	data.courses.push(copy);
 	save();
 	return copy;
+}
+
+/* ==================== 课表导入（P3 模式B：多模态 AI 识别） ==================== */
+
+/**
+ * 解析出的课程归一化为存储格式：生成 id、自动配色、周次规则兜底
+ * @param {object} c 解析出的课程（无 id/color，见 utils/parser.js）
+ */
+function normalizeImported(c, index) {
+	const name = String(c.name || '未命名课程').trim();
+	let weeks = String(c.weeks || 'all').trim();
+	if (!isValidWeeksPattern(weeks)) weeks = 'all';
+	return {
+		id: genId(),
+		name,
+		teacher: String(c.teacher || '').trim(),
+		classroom: String(c.classroom || '').trim(),
+		color: c.color || IMPORT_COLORS[index % IMPORT_COLORS.length],
+		remark: String(c.remark || '').trim(),
+		weekday: Math.min(Math.max(Math.round(Number(c.weekday)) || 1, 1), 7),
+		startSection: Math.max(Math.round(Number(c.startSection)) || 1, 1),
+		endSection: Math.max(Math.round(Number(c.endSection)) || 0, 1),
+		weeks,
+		sourceKey: c.sourceKey != null ? String(c.sourceKey) : null,
+	};
+}
+
+/**
+ * 批量导入课程（导入页提交入口）
+ * - replace：以解析结果替换全部课程（config/假期/调休保留）
+ * - merge：按 sourceKey / 名称+星期+开始节次 增量匹配（更新保留本地 id/color/remark）
+ * 导入前自动备份当前数据（设置页「撤销导入」可恢复），单次持久化。
+ * @param {Array} list 解析出的课程
+ * @param {'replace'|'merge'} mode
+ * @returns {{ ok: boolean, added: number, updated: number, error?: string }}
+ */
+export function importCourses(list, mode) {
+	let nextCourses;
+	let added = 0;
+	let updated = 0;
+
+	if (mode === 'replace') {
+		nextCourses = list.map((c, i) => normalizeImported(c, i));
+		added = list.length;
+	} else {
+		const m = mergeCourses(list, data.courses);
+		added = m.add.length;
+		updated = m.update.length;
+		if (added === 0 && updated === 0) {
+			return { ok: true, added: 0, updated: 0 }; // 无变更，不触碰存储
+		}
+		// 仅归一化新增课程（无 id）；已存在课程保持原对象（更新已由 mergeCourses 合并语义字段）
+		let colorIdx = 0;
+		nextCourses = m.courses.map((c) => (c.id ? c : normalizeImported(c, colorIdx++)));
+	}
+
+	// 导入前自动备份当前数据，供撤销（失败中止，不修改任何状态）
+	if (!backupCurrent(data)) {
+		return { ok: false, added: 0, updated: 0, error: '自动备份失败，已中止导入' };
+	}
+
+	data.courses.splice(0, data.courses.length, ...nextCourses);
+	const ok = saveData(data); // 失败时 saveData 已提示；备份仍在，可撤销
+	return { ok, added, updated, error: ok ? undefined : '写入存储失败' };
 }
 
 /* ==================== 假期 / 调休 ==================== */
@@ -168,6 +238,7 @@ export function useData() {
 		updateCourse,
 		deleteCourse,
 		copyCourse,
+		importCourses,
 		addHolidays,
 		deleteHoliday,
 		addAdjustment,

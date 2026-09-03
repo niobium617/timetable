@@ -152,24 +152,30 @@
 			</view>
 
 			<view class="add-form">
-				<picker mode="date" :value="adjustForm.date" @change="(e) => (adjustForm.date = e.detail.value)">
+				<picker mode="date" :value="adjustForm.date" @change="onAdjustDateChange">
 					<view class="time-box">{{ adjustForm.date || '调休日期' }}</view>
 				</picker>
-				<picker mode="selector" :range="WEEKDAY_NAMES" :value="adjustForm.weekday - 1" @change="(e) => (adjustForm.weekday = Number(e.detail.value) + 1)">
+				<picker mode="selector" :range="WEEKDAY_NAMES" :value="adjustForm.weekday - 1" @change="onAdjustWeekdayChange">
 					<view class="time-box">{{ weekdayName(adjustForm.weekday) }}</view>
 				</picker>
 				<input class="mini-input" v-model="adjustForm.remark" placeholder="备注，如补周一的课" />
 				<view class="btn-mini btn-primary" @click="onAddAdjustment">添加</view>
 			</view>
+			<view v-if="adjustHint" class="form-tip adjust-hint">{{ adjustHint }}</view>
 			<view class="form-tip">调休当天按目标星期的课表上课，单双周/周段用当天周号过滤</view>
 		</view>
 
-		<!-- ============ 课表导入（P3 规划中） ============ -->
-		<view class="tt-card card-disabled">
+		<!-- ============ 课表导入 ============ -->
+		<view class="tt-card">
 			<view class="tt-card-title">课表导入</view>
-			<view class="import-plan">
-				<text>开发中：模式A 服务器一键导入 / 模式B 粘贴源码解析（兜底）</text>
+			<view class="import-entry" @click="goImport">
+				<view class="import-entry-main">
+					<text class="import-entry-title">多模态 AI 识别导入</text>
+					<text class="import-entry-sub">内置提示词：截图课表发给 AI，粘贴返回的 JSON 即可导入</text>
+				</view>
+				<u-icon name="arrow-right" size="14" color="#c0c4cc"></u-icon>
 			</view>
+			<view class="form-tip">模式A 服务器一键导入：开发中；本入口为当前可用方式</view>
 		</view>
 
 		<!-- ============ 数据管理 ============ -->
@@ -252,7 +258,8 @@ import { ref, reactive, computed } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import { useData } from '../../store/useData.js';
 import { getDisplayWeekInfo } from '../../utils/week.js';
-import { WEEKDAY_NAMES, parseDate, formatDate, addDays, todayStr, diffDays } from '../../utils/time.js';
+import { WEEKDAY_NAMES, parseDate, formatDate, addDays, todayStr, diffDays, getWeekday } from '../../utils/time.js';
+import { suggestAdjustWeekday } from '../../utils/holiday.js';
 
 // 每次进入页面时同步本地草稿（如导入/重置后返回）
 onShow(() => {
@@ -438,9 +445,35 @@ function onDeleteHoliday(h) {
 
 /* ---------- 调休 ---------- */
 const adjustForm = reactive({ date: '', weekday: 1, remark: '' });
+/** 调休建议提示（选日期后自动推算，见 suggestAdjustWeekday） */
+const adjustHint = ref('');
+const adjustSuggestion = ref(null);
 
 function weekdayName(w) {
 	return WEEKDAY_NAMES[(w || 1) - 1];
+}
+
+/** 选择调休日期：自动推算建议的补课星期（可改选，改选后提示不再显示建议来源） */
+function onAdjustDateChange(e) {
+	adjustForm.date = e.detail.value;
+	const sug = suggestAdjustWeekday(adjustForm.date, data.holidays);
+	adjustSuggestion.value = sug;
+	const own = `${adjustForm.date} 是${weekdayName(getWeekday(adjustForm.date))}`;
+	if (sug) {
+		adjustForm.weekday = sug.weekday;
+		adjustHint.value = `${own}；附近假期 ${sug.sourceDate}，已自动建议补${weekdayName(sug.weekday)}的课，可改选`;
+	} else {
+		adjustHint.value = `${own}；附近 21 天内没有假期记录，请按放假通知手动选择补课星期`;
+	}
+}
+
+/** 手动改选补课星期：不再被自动建议覆盖 */
+function onAdjustWeekdayChange(e) {
+	adjustForm.weekday = Number(e.detail.value) + 1;
+	if (adjustSuggestion.value) {
+		adjustSuggestion.value = null;
+		adjustHint.value = '已手动选择，按所选星期执行';
+	}
 }
 
 function onAddAdjustment() {
@@ -473,7 +506,10 @@ function doAddAdjustment(date) {
 	});
 	uni.showToast({ title: '已保存调休', icon: 'success' });
 	adjustForm.date = '';
+	adjustForm.weekday = 1;
 	adjustForm.remark = '';
+	adjustHint.value = '';
+	adjustSuggestion.value = null;
 }
 
 function onDeleteAdjustment(a) {
@@ -490,6 +526,10 @@ function onDeleteAdjustment(a) {
 /* ---------- 数据管理 ---------- */
 const exportShow = ref(false);
 const exportText = ref('');
+
+function goImport() {
+	uni.navigateTo({ url: '/pages/import/import' });
+}
 
 function onExport() {
 	exportText.value = exportData();
@@ -759,15 +799,41 @@ const stats = computed(() => {
 	}
 }
 
-/* 导入（P3 规划） */
-.card-disabled {
-	opacity: 0.75;
+/* 课表导入入口 */
+.import-entry {
+	display: flex;
+	align-items: center;
+	gap: 16rpx;
+	padding: 20rpx 24rpx;
+	background: #f5f7fa;
+	border-radius: 12rpx;
 
-	.import-plan {
-		font-size: 24rpx;
-		color: #909399;
-		line-height: 1.6;
+	.import-entry-main {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 6rpx;
 	}
+
+	.import-entry-title {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #303133;
+	}
+
+	.import-entry-sub {
+		font-size: 22rpx;
+		color: #909399;
+		line-height: 1.5;
+	}
+
+	&:active {
+		background: #ecf5ff;
+	}
+}
+
+.adjust-hint {
+	color: #e6a23c;
 }
 
 /* 数据管理 */

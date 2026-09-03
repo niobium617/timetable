@@ -20,6 +20,12 @@
 			}
 		},
 		{
+			"path": "pages/import/import",
+			"style": {
+				"navigationBarTitleText": "导入课表"
+			}
+		},
+		{
 			"path": "pages/settings/settings",
 			"style": {
 				"navigationBarTitleText": "设置"
