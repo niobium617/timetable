@@ -4,11 +4,13 @@
  * 用于演示各渲染效果：
  * - 单/双周、单段与多段周区间课程
  * - 同节次多课并排（周三第5-6节两门课）
- * - 国庆假期（10月1-3日，置灰不显示课程）
- * - 调休补课（10月10日周六补周一课，显示「补」角标）
+ * - 2026 年官方假期（国务院 2025-11-04 通知，33 天，见 utils/officialHolidays.js）
+ * - 官方调休上班日（6 天，补课星期按附近假期推算，可核对改选）
  *
  * 学期起始日 2026-08-31 为周一（2026-09-01 即开学第1周周二）。
  */
+import { OFFICIAL_HOLIDAYS_2026, OFFICIAL_ADJUSTMENTS_2026 } from '../utils/officialHolidays.js';
+import { suggestAdjustWeekday } from '../utils/holiday.js';
 
 /** 默认节次时间表：12 节，覆盖常见大学作息 */
 export function defaultSections() {
@@ -56,13 +58,11 @@ export function sampleData() {
 			{ id: 'c_demo_12', name: '物理实验', teacher: '吴老师', classroom: '实验楼A-203', color: '#8e44ad', remark: '', weekday: 5, startSection: 5, endSection: 6, weeks: 'even', sourceKey: null },
 			{ id: 'c_demo_13', name: '高等数学答疑', teacher: '张老师', classroom: '教1-101', color: '#409eff', remark: '答疑课', weekday: 5, startSection: 7, endSection: 8, weeks: '1-16', sourceKey: null },
 		],
-		holidays: [
-			{ date: '2026-10-01', name: '国庆节' },
-			{ date: '2026-10-02', name: '国庆节' },
-			{ date: '2026-10-03', name: '国庆节' },
-		],
-		adjustments: [
-			{ date: '2026-10-10', targetWeekday: 1, remark: '补周一的课' },
-		],
+		holidays: OFFICIAL_HOLIDAYS_2026.map((h) => ({ ...h })),
+		adjustments: OFFICIAL_ADJUSTMENTS_2026.map((a) => ({
+			date: a.date,
+			targetWeekday: suggestAdjustWeekday(a.date, OFFICIAL_HOLIDAYS_2026)?.weekday || 1,
+			remark: a.remark,
+		})),
 	};
 }

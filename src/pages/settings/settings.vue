@@ -135,6 +135,7 @@
 				<view class="btn-mini btn-primary" @click="onAddHoliday">添加</view>
 			</view>
 			<view class="form-tip">假期当天完全不显示课程（即使同时是调休，假期优先）</view>
+			<view class="btn-mini btn-plain official-btn" @click="onAddOfficialHolidays">一键添加 2026 官方假期（33 天）</view>
 		</view>
 
 		<!-- ============ 调休管理 ============ -->
@@ -163,6 +164,7 @@
 			</view>
 			<view v-if="adjustHint" class="form-tip adjust-hint">{{ adjustHint }}</view>
 			<view class="form-tip">调休当天按目标星期的课表上课，单双周/周段用当天周号过滤</view>
+			<view class="btn-mini btn-plain official-btn" @click="onAddOfficialAdjustments">一键添加 2026 官方调休上班日（6 天）</view>
 		</view>
 
 		<!-- ============ 课表导入 ============ -->
@@ -260,6 +262,7 @@ import { useData } from '../../store/useData.js';
 import { getDisplayWeekInfo } from '../../utils/week.js';
 import { WEEKDAY_NAMES, parseDate, formatDate, addDays, todayStr, diffDays, getWeekday } from '../../utils/time.js';
 import { suggestAdjustWeekday } from '../../utils/holiday.js';
+import { OFFICIAL_HOLIDAYS_2026, OFFICIAL_ADJUSTMENTS_2026 } from '../../utils/officialHolidays.js';
 
 // 每次进入页面时同步本地草稿（如导入/重置后返回）
 onShow(() => {
@@ -430,6 +433,53 @@ function onAddHoliday() {
 	holidayForm.end = '';
 	holidayForm.name = '';
 	holidayForm.range = false;
+}
+
+/** 一键添加 2026 官方假期（已存在的日期自动跳过） */
+function onAddOfficialHolidays() {
+	const missing = OFFICIAL_HOLIDAYS_2026.filter((h) => !data.holidays.some((x) => x.date === h.date));
+	if (missing.length === 0) {
+		uni.showToast({ title: '官方假期已全部添加', icon: 'none' });
+		return;
+	}
+	uni.showModal({
+		title: '添加官方假期',
+		content: `将添加国务院公布的 2026 年官方假期（${missing.length} 天未添加，已添加的自动跳过）。`,
+		confirmColor: '#409eff',
+		success: (res) => {
+			if (!res.confirm) return;
+			missing.forEach((h) => addHolidays(h.date, h.name));
+			uni.showToast({ title: `已添加 ${missing.length} 天假期`, icon: 'success' });
+		},
+	});
+}
+
+/** 一键添加 2026 官方调休上班日（补课星期官方未定义，按附近假期推算，请核对） */
+function onAddOfficialAdjustments() {
+	const missing = OFFICIAL_ADJUSTMENTS_2026.filter((a) => !data.adjustments.some((x) => x.date === a.date));
+	if (missing.length === 0) {
+		uni.showToast({ title: '官方调休已全部添加', icon: 'none' });
+		return;
+	}
+	uni.showModal({
+		title: '添加官方调休',
+		content: `将添加 ${missing.length} 个官方调休上班日，补课星期按附近假期自动推算，请按学校通知核对改选。`,
+		confirmColor: '#409eff',
+		success: (res) => {
+			if (!res.confirm) return;
+			let n = 0;
+			missing.forEach((a) => {
+				const sug = suggestAdjustWeekday(a.date, data.holidays);
+				addAdjustment({
+					date: a.date,
+					targetWeekday: sug ? sug.weekday : getWeekday(a.date),
+					remark: a.remark,
+				});
+				n++;
+			});
+			uni.showToast({ title: `已添加 ${n} 个调休上班日`, icon: 'success' });
+		},
+	});
 }
 
 function onDeleteHoliday(h) {
@@ -834,6 +884,10 @@ const stats = computed(() => {
 
 .adjust-hint {
 	color: #e6a23c;
+}
+
+.official-btn {
+	margin-top: 16rpx;
 }
 
 /* 数据管理 */
