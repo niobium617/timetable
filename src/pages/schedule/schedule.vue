@@ -52,6 +52,7 @@
 			:show="editShow"
 			:course="editCourse"
 			:prefill="editPrefill"
+			:date-context="editDateContext"
 			:sections-count="data.config.sections.length"
 			@close="editShow = false"
 			@save="onCourseSave"
@@ -195,16 +196,20 @@ function goSettings() {
 const editShow = ref(false);
 const editCourse = ref(null);
 const editPrefill = ref(null);
+/** 打开弹窗时所在日期（课程卡点击的当天），作为「单次」模式的默认生效日期 */
+const editDateContext = ref('');
 
-function openEdit(course) {
+function openEdit(course, date) {
 	editCourse.value = course;
 	editPrefill.value = null;
+	editDateContext.value = date || '';
 	editShow.value = true;
 }
 
-function onCellClick({ weekday, section }) {
+function onCellClick({ weekday, section, date }) {
 	editCourse.value = null;
-	editPrefill.value = { weekday, section };
+	editPrefill.value = { weekday, section, date };
+	editDateContext.value = date || '';
 	editShow.value = true;
 }
 

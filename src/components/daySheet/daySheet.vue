@@ -32,11 +32,16 @@
 						v-for="item in courseList"
 						:key="item.course.id + item.date"
 						class="sheet-course"
+						:class="{ 'course-conflict': !!item.course.conflict }"
 						@click="$emit('courseClick', item.course)"
 					>
 						<view class="course-bar" :style="{ backgroundColor: item.course.color }"></view>
 						<view class="course-main">
-							<text class="course-name">{{ item.course.name }}</text>
+							<view class="course-name-line">
+								<text class="course-name">{{ item.course.name }}</text>
+								<text v-if="item.course.date" class="tag tag-once">临时</text>
+								<text v-if="item.course.conflict" class="tag tag-conflict">冲突</text>
+							</view>
 							<view class="course-sub">
 								<text v-if="item.course.teacher" class="sub-item">{{ item.course.teacher }}</text>
 								<text v-if="item.course.classroom" class="sub-item">{{ item.course.classroom }}</text>
@@ -52,6 +57,10 @@
 					<view v-if="courseList.length === 0" class="sheet-empty">
 						<text class="empty-icon">🍃</text>
 						<text>这一天没有课程</text>
+					</view>
+
+					<view v-if="!status.isHoliday" class="sheet-add" @click="$emit('add')">
+						<text>＋ 添加课程</text>
 					</view>
 				</template>
 			</scroll-view>
@@ -75,7 +84,7 @@ const props = defineProps({
 	show: { type: Boolean, default: false },
 	date: { type: String, default: '' },
 });
-defineEmits(['close', 'courseClick']);
+defineEmits(['close', 'courseClick', 'add']);
 
 const { data } = useData();
 
@@ -206,6 +215,10 @@ const courseList = computed(() => {
 		background: #f5f9ff;
 	}
 
+	&.course-conflict {
+		background: #fef0f0;
+	}
+
 	.course-bar {
 		width: 10rpx;
 		height: 64rpx;
@@ -217,6 +230,13 @@ const courseList = computed(() => {
 		flex: 1;
 		min-width: 0;
 
+		.course-name-line {
+			display: flex;
+			align-items: center;
+			gap: 10rpx;
+			min-width: 0;
+		}
+
 		.course-name {
 			font-size: 30rpx;
 			font-weight: 600;
@@ -225,6 +245,25 @@ const courseList = computed(() => {
 			overflow: hidden;
 			white-space: nowrap;
 			text-overflow: ellipsis;
+			flex: 1;
+			min-width: 0;
+		}
+
+		.tag {
+			flex-shrink: 0;
+			font-size: 18rpx;
+			padding: 2rpx 10rpx;
+			border-radius: 6rpx;
+			color: #ffffff;
+			line-height: 1.5;
+
+			&.tag-once {
+				background: #16a085;
+			}
+
+			&.tag-conflict {
+				background: #f56c6c;
+			}
 		}
 
 		.course-sub {
@@ -261,6 +300,21 @@ const courseList = computed(() => {
 			font-size: 20rpx;
 			color: #c0c4cc;
 		}
+	}
+}
+
+/* 添加课程按钮 */
+.sheet-add {
+	margin-top: 24rpx;
+	text-align: center;
+	padding: 20rpx 0;
+	font-size: 26rpx;
+	color: #409eff;
+	background: #ecf5ff;
+	border-radius: 12rpx;
+
+	&:active {
+		opacity: 0.85;
 	}
 }
 

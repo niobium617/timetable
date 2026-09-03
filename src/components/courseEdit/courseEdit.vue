@@ -45,6 +45,21 @@
 					<input class="form-input" v-model="form.classroom" placeholder="选填" placeholder-class="ph" />
 				</view>
 
+				<!-- 生效范围 -->
+				<view class="form-row form-row-col">
+					<text class="form-label">生效范围</text>
+					<view class="week-chips">
+						<view class="chip" :class="{ active: form.scope === 'weekly' }" @click="onScopeChange('weekly')">每周</view>
+						<view class="chip" :class="{ active: form.scope === 'once' }" @click="onScopeChange('once')">单次</view>
+					</view>
+					<view v-if="form.scope === 'once'" class="custom-weeks">
+						<picker mode="date" :value="form.onceDate" @change="(e) => (form.onceDate = e.detail.value)">
+							<view class="date-box">{{ form.onceDate }}</view>
+						</picker>
+						<text class="scope-tip">{{ scopeTip }}</text>
+					</view>
+				</view>
+
 				<!-- 颜色 -->
 				<view class="form-row form-row-col">
 					<text class="form-label">颜色</text>
@@ -91,8 +106,8 @@
 					</view>
 				</view>
 
-				<!-- 周规则 -->
-				<view class="form-row form-row-col">
+				<!-- 周规则（单次模式不适用，隐藏） -->
+				<view v-if="form.scope === 'weekly'" class="form-row form-row-col">
 					<text class="form-label">上课周次</text>
 					<view class="week-chips">
 						<view
@@ -138,14 +153,16 @@
  * - course 非空 → 编辑模式（底部出现 删除/复制）
  */
 import { ref, reactive, watch, computed } from 'vue';
-import { WEEKDAY_NAMES } from '../../utils/time.js';
+import { WEEKDAY_NAMES, todayStr } from '../../utils/time.js';
 import { describeWeeks, parseWeeksPattern } from '../../utils/weeksPattern.js';
 
 const props = defineProps({
 	show: { type: Boolean, default: false },
 	course: { type: Object, default: null },
-	/** 快速新增预填：{ weekday, section } */
+	/** 快速新增预填：{ weekday, section, date? }（空白格/当日弹窗快速新增） */
 	prefill: { type: Object, default: null },
+	/** 打开弹窗时所在日期（课程卡点击的当天），「单次」模式的默认生效日期 */
+	dateContext: { type: String, default: '' },
 	/** 节次总数（来自 config.sections） */
 	sectionsCount: { type: Number, default: 12 },
 });
@@ -176,6 +193,12 @@ const form = reactive({
 	weekType: 'all',
 	customPattern: '1-16',
 	remark: '',
+	/** 生效范围：weekly 每周 / once 单次（仅所选日期生效） */
+	scope: 'weekly',
+	onceDate: '',
+	/** 原课程是否一次性课（编辑既有一次性课时保留 date/overrideId） */
+	originalDate: null,
+	originalOverrideId: null,
 });
 
 /** 自定义周次实时预览 */
@@ -209,6 +232,12 @@ function initForm() {
 	form.endSection = c ? c.endSection : (pre && pre.section) || 2;
 	form.remark = c ? c.remark : '';
 
+	// 生效范围：编辑既有一次性课 → 单次；否则每周（prefill.date/dateContext 作为单次模式默认日期）
+	form.originalDate = c ? c.date || null : null;
+	form.originalOverrideId = c ? c.overrideId || null : null;
+	form.scope = form.originalDate ? 'once' : 'weekly';
+	form.onceDate = form.originalDate || (pre && pre.date) || props.dateContext || todayStr();
+
 	if (c && c.weeks) {
 		const p = c.weeks;
 		if (p === 'odd' || p === 'even') {
@@ -226,6 +255,17 @@ function initForm() {
 		form.customPattern = '1-16';
 	}
 }
+
+function onScopeChange(scope) {
+	form.scope = scope;
+}
+
+/** 单次模式提示文案 */
+const scopeTip = computed(() => {
+	if (!isEdit.value) return '仅所选日期生效的一次性课（临时课）';
+	if (!form.originalDate) return '保存后将作为仅该日期生效的一次性课，原每周课在其他日期不受影响';
+	return '该一次性课仅所选日期生效';
+});
 
 function onWeekdayChange(e) {
 	form.weekday = Number(e.detail.value) + 1;
@@ -248,20 +288,31 @@ function onSave() {
 		uni.showToast({ title: '请填写课程名称', icon: 'none' });
 		return;
 	}
-	// 周规则组装
-	let weeks = form.weekType;
-	if (form.weekType === 'custom') {
-		const p = String(form.customPattern || '').trim();
-		const { weeks: set } = parseWeeksPattern(p);
-		if (!set || set.size === 0) {
-			uni.showToast({ title: '自定义周次格式不正确', icon: 'none' });
-			return;
+	// 单次模式：必须选生效日期
+	if (form.scope === 'once' && !form.onceDate) {
+		uni.showToast({ title: '请选择生效日期', icon: 'none' });
+		return;
+	}
+	// 周规则组装（单次模式忽略周次，固定 all）
+	let weeks = 'all';
+	if (form.scope === 'weekly') {
+		weeks = form.weekType;
+		if (form.weekType === 'custom') {
+			const p = String(form.customPattern || '').trim();
+			const { weeks: set } = parseWeeksPattern(p);
+			if (!set || set.size === 0) {
+				uni.showToast({ title: '自定义周次格式不正确', icon: 'none' });
+				return;
+			}
+			weeks = p;
 		}
-		weeks = p;
 	}
 
+	// 「仅本次修改」拆分：编辑每周课切到单次保存 → 新增一次性课（overrideId 指向原课），原课不动
+	const isSplitting = form.scope === 'once' && isEdit.value && !form.originalDate;
+
 	emit('save', {
-		id: form.id,
+		id: isSplitting ? null : form.id,
 		name,
 		teacher: String(form.teacher || '').trim(),
 		classroom: String(form.classroom || '').trim(),
@@ -271,6 +322,9 @@ function onSave() {
 		endSection: form.endSection,
 		weeks,
 		remark: String(form.remark || '').trim(),
+		// 一次性课字段：单次 → date 生效；拆分 → overrideId 抑制原课该日期
+		date: form.scope === 'once' ? form.onceDate : undefined,
+		overrideId: isSplitting ? form.id : form.originalOverrideId != null ? form.originalOverrideId : undefined,
 	});
 }
 
@@ -477,6 +531,23 @@ function onDelete() {
 .custom-weeks {
 	width: 100%;
 	margin-top: 16rpx;
+
+	.date-box {
+		display: inline-block;
+		background: #f5f7fa;
+		border-radius: 10rpx;
+		padding: 10rpx 24rpx;
+		font-size: 26rpx;
+		color: #303133;
+	}
+
+	.scope-tip {
+		display: block;
+		margin-top: 10rpx;
+		font-size: 22rpx;
+		color: #e6a23c;
+		line-height: 1.4;
+	}
 
 	.pattern-preview {
 		display: block;

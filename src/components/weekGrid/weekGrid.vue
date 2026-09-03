@@ -54,7 +54,9 @@
 						<course-card
 							:course="item.course"
 							:compact="item.compact"
-							@click="$emit('courseClick', item.course)"
+							:once="!!item.course.date"
+							:conflict="!!item.course.conflict"
+							@click="$emit('courseClick', item.course, item.date)"
 						/>
 					</view>
 				</view>

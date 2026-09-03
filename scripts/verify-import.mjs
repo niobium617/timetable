@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseTimetable, Parser } from '../src/utils/parser.js';
 import { matchIncremental, mergeCourses, findConflicts } from '../src/utils/importMatch.js';
 import { suggestAdjustWeekday } from '../src/utils/holiday.js';
+import { getCoursesOfDate } from '../src/utils/filter.js';
 import { OFFICIAL_HOLIDAYS, OFFICIAL_ADJUSTMENTS, getOfficialYears } from '../src/utils/officialHolidays.js';
 import { getWeekday } from '../src/utils/time.js';
 
@@ -151,6 +152,43 @@ assert(H26.some((h) => h.date === '2026-02-15' && h.name === '春节'), '春节 
 assert(A26.length === 6, `2026 官方调休上班日 6 个（实际 ${A26.length}）`);
 assert(A26.every((a) => getWeekday(a.date) >= 6), '调休上班日均为周六/周日');
 assert(A26.every((a) => suggestAdjustWeekday(a.date, H26) != null), '每个调休日都能推算补课星期');
+
+console.log('== 过滤链：一次性课（date/overrideId/冲突标记）==');
+const baseData = {
+	config: { termStartDate: '2026-08-31', firstWeekType: 'odd', manualWeek: null },
+	holidays: [],
+	adjustments: [],
+};
+const weeklyMath = { id: 'w1', name: '高等数学', weekday: 1, startSection: 1, endSection: 2, weeks: 'all', sourceKey: null };
+const weeklyPE = { id: 'w2', name: '体育', weekday: 1, startSection: 5, endSection: 6, weeks: 'all', sourceKey: null };
+
+// 一次性课在其日期显示（weekday 与当天星期不同也显示——日期即意图）
+let r1 = getCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath, { id: 'o1', name: '讲座', weekday: 3, startSection: 9, endSection: 10, weeks: 'all', date: '2026-09-07', sourceKey: null }] });
+assert(r1.length === 2 && r1.some((c) => c.name === '讲座'), '一次性课命中其日期（不依赖星期）');
+
+// 非命中日期不显示（同为周一，仅每周课）
+let r2 = getCoursesOfDate('2026-09-14', { ...baseData, courses: [weeklyMath, { id: 'o1', name: '讲座', weekday: 1, startSection: 9, endSection: 10, weeks: 'all', date: '2026-09-07', sourceKey: null }] });
+assert(r2.length === 1 && r2[0].id === 'w1', '一次性课仅在其日期显示');
+
+// overrideId 抑制：拆分课替换原每周课，无冲突标记
+let r3 = getCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath, { id: 'o1', name: '高等数学（换教室）', weekday: 1, startSection: 1, endSection: 2, weeks: 'all', date: '2026-09-07', overrideId: 'w1', sourceKey: null }] });
+assert(r3.length === 1 && r3[0].id === 'o1' && !r3[0].conflict, 'overrideId 抑制原课且不标冲突');
+
+// 冲突：一次性课与每周课同节次重叠（无 overrideId）→ 双方标红
+let r4 = getCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath, { id: 'o2', name: '临时补课', weekday: 1, startSection: 1, endSection: 2, weeks: 'all', date: '2026-09-07', sourceKey: null }] });
+assert(r4.length === 2 && r4.every((c) => c.conflict === true), '一次性课与每周课重叠 → 双方标冲突');
+
+// 每周课之间重叠不标冲突（维持并排）
+let r5 = getCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath, { ...weeklyPE, id: 'w3', startSection: 1, endSection: 2 }] });
+assert(r5.length === 2 && r5.every((c) => !c.conflict), '每周课之间重叠不标冲突');
+
+// 假期压制一次性课
+let r6 = getCoursesOfDate('2026-09-25', { ...baseData, holidays: [{ date: '2026-09-25' }], courses: [{ id: 'o3', name: '补课', weekday: 5, startSection: 1, endSection: 2, weeks: 'all', date: '2026-09-25', sourceKey: null }] });
+assert(r6.length === 0, '假期当天一次性课同样不显示');
+
+// 调休日：每周课按 targetWeekday 重映射，一次性课独立显示
+let r7 = getCoursesOfDate('2026-09-12', { ...baseData, adjustments: [{ date: '2026-09-12', targetWeekday: 1 }], courses: [weeklyMath, { id: 'o4', name: '周六活动', weekday: 3, startSection: 7, endSection: 8, weeks: 'all', date: '2026-09-12', sourceKey: null }] });
+assert(r7.some((c) => c.id === 'w1') && r7.some((c) => c.id === 'o4'), '调休日每周课重映射 + 一次性课独立显示');
 
 console.log('== suggestAdjustWeekday ==');
 const holidays = [{ date: '2026-10-01' }, { date: '2026-10-02' }, { date: '2026-10-03' }];

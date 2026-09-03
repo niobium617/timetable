@@ -9,7 +9,7 @@
 
 import { getWeekInfo } from './week.js';
 import { isCourseOnWeek } from './weeksPattern.js';
-import { getWeekday } from './time.js';
+import { getWeekday, sectionsOverlap } from './time.js';
 
 /** 查找命中某日期的假期（返回对象或 null） */
 export function getHolidayOfDate(dateStr, holidays = []) {
@@ -44,23 +44,69 @@ export function getDateStatus(dateStr, { holidays = [], adjustments = [], config
  * 过滤链核心：某日期当天应显示的课程列表
  * @param {string} dateStr 'YYYY-MM-DD'
  * @param {object} data { courses, holidays, adjustments, config }
- * @returns {Array} 按 startSection 升序的课程数组
+ * @returns {Array} 按 startSection 升序的课程数组；一次性课参与的节次重叠项带 conflict:true 副本
  */
 export function getCoursesOfDate(dateStr, data = {}) {
 	const { courses = [], holidays = [], adjustments = [], config = {} } = data;
 	const { isHoliday, adjustment, weekNum, weekday } = getDateStatus(dateStr, { holidays, adjustments, config });
 
-	// 1. 假期优先：完全不显示课程
+	// 1. 假期优先：完全不显示课程（一次性课同样被压制）
 	if (isHoliday) return [];
 
-	// 2/3. 确定生效的星期（调休覆盖原生星期），周号一律用当天教学周号
+	// 2/3. 每周课：调休覆盖原生星期，周号一律用当天教学周号；
+	// 一次性课（course.date 命中当天）独立于调休星期重映射——日期即用户意图
 	const effectiveWeekday = adjustment ? adjustment.targetWeekday : weekday;
 
-	const list = courses.filter(c =>
-		c.weekday === effectiveWeekday && isCourseOnWeek(c, weekNum)
-	);
+	const weekly = courses.filter((c) => !c.date && c.weekday === effectiveWeekday && isCourseOnWeek(c, weekNum));
+	const oneoffs = courses.filter((c) => c.date === dateStr);
+
+	// 「仅本次修改」的一次性课（overrideId）在该日期替换原每周课的显示
+	const overridden = new Set(oneoffs.map((o) => o.overrideId).filter((id) => id != null));
+	const list = [...weekly.filter((c) => !overridden.has(c.id)), ...oneoffs];
+
 	// 同日同节次多课按 startSection 排序（并排渲染由 weekGrid 的布局算法处理）
-	return list.sort((a, b) => a.startSection - b.startSection || a.endSection - b.endSection);
+	list.sort((a, b) => a.startSection - b.startSection || a.endSection - b.endSection);
+	return markOnceConflicts(list);
+}
+
+/**
+ * 冲突标记：节次区间重叠且至少一方为一次性课 → 相关课程全部返回 conflict:true 副本
+ * （每周课之间重叠维持并排渲染，不标冲突；渲染层标红，由用户编辑解决）
+ */
+function markOnceConflicts(list) {
+	const n = list.length;
+	const adj = Array.from({ length: n }, () => []);
+	for (let i = 0; i < n; i++) {
+		for (let j = i + 1; j < n; j++) {
+			const a = list[i];
+			const b = list[j];
+			if (!a.date && !b.date) continue;
+			if (sectionsOverlap(a.startSection, a.endSection, b.startSection, b.endSection)) {
+				adj[i].push(j);
+				adj[j].push(i);
+			}
+		}
+	}
+	const inGroup = new Array(n).fill(false);
+	const visited = new Array(n).fill(false);
+	for (let i = 0; i < n; i++) {
+		if (visited[i]) continue;
+		const comp = [];
+		const stack = [i];
+		visited[i] = true;
+		while (stack.length) {
+			const cur = stack.pop();
+			comp.push(cur);
+			adj[cur].forEach((nb) => {
+				if (!visited[nb]) {
+					visited[nb] = true;
+					stack.push(nb);
+				}
+			});
+		}
+		if (comp.length >= 2) comp.forEach((idx) => (inGroup[idx] = true));
+	}
+	return list.map((c, i) => (inGroup[i] ? { ...c, conflict: true } : c));
 }
 
 /**

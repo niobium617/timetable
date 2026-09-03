@@ -41,12 +41,15 @@
 			:date="sheetDate"
 			@close="sheetShow = false"
 			@course-click="openEdit"
+			@add="onDaySheetAdd"
 		/>
 
 		<!-- 课程编辑弹窗 -->
 		<course-edit
 			:show="editShow"
 			:course="editCourse"
+			:prefill="editPrefill"
+			:date-context="editDateContext"
 			:sections-count="data.config.sections.length"
 			@close="editShow = false"
 			@save="onCourseSave"
@@ -66,13 +69,14 @@
 import { ref, computed } from 'vue';
 import { useData } from '../../store/useData.js';
 import { getDisplayWeekInfo } from '../../utils/week.js';
-import { todayStr, parseDate } from '../../utils/time.js';
+import { todayStr, parseDate, getWeekday } from '../../utils/time.js';
 import monthCal from '../../components/monthCal/monthCal.vue';
 import daySheet from '../../components/daySheet/daySheet.vue';
 import courseEdit from '../../components/courseEdit/courseEdit.vue';
 
 const {
 	data,
+	addCourse,
 	updateCourse,
 	deleteCourse,
 	copyCourse,
@@ -119,17 +123,37 @@ function onSelectDate(date) {
 
 const editShow = ref(false);
 const editCourse = ref(null);
+const editPrefill = ref(null);
+/** 打开弹窗时所在日期（当日弹窗的日期），作为「单次」模式默认生效日期 */
+const editDateContext = ref('');
 
 function openEdit(course) {
 	sheetShow.value = false; // 先收起当日弹窗
 	editCourse.value = course;
+	editPrefill.value = null;
+	editDateContext.value = sheetDate.value;
+	editShow.value = true;
+}
+
+/** 当日弹窗「添加课程」：按所选日期新增（单次模式日期预填） */
+function onDaySheetAdd() {
+	sheetShow.value = false;
+	editCourse.value = null;
+	editPrefill.value = { weekday: getWeekday(sheetDate.value), date: sheetDate.value };
+	editDateContext.value = sheetDate.value;
 	editShow.value = true;
 }
 
 function onCourseSave(payload) {
-	const { id, ...patch } = payload;
-	updateCourse(id, patch);
-	uni.showToast({ title: '已保存', icon: 'success' });
+	if (payload.id) {
+		const { id, ...patch } = payload;
+		updateCourse(id, patch);
+		uni.showToast({ title: '已保存', icon: 'success' });
+	} else {
+		const { id, ...rest } = payload;
+		addCourse(rest);
+		uni.showToast({ title: '已添加', icon: 'success' });
+	}
 	editShow.value = false;
 	sheetShow.value = true; // 回到当日弹窗，便于继续查看
 }

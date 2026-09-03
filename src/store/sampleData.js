@@ -57,6 +57,7 @@ export function sampleData() {
 			{ id: 'c_demo_11', name: '大学物理', teacher: '吴老师', classroom: '教2-101', color: '#8e44ad', remark: '', weekday: 5, startSection: 1, endSection: 2, weeks: 'even', sourceKey: null },
 			{ id: 'c_demo_12', name: '物理实验', teacher: '吴老师', classroom: '实验楼A-203', color: '#8e44ad', remark: '', weekday: 5, startSection: 5, endSection: 6, weeks: 'even', sourceKey: null },
 			{ id: 'c_demo_13', name: '高等数学答疑', teacher: '张老师', classroom: '教1-101', color: '#409eff', remark: '答疑课', weekday: 5, startSection: 7, endSection: 8, weeks: '1-16', sourceKey: null },
+		{ id: 'c_demo_14', name: '职业规划讲座', teacher: '', classroom: '报告厅1', color: '#16a085', remark: '一次性课示例（临时角标）', weekday: 1, startSection: 9, endSection: 10, weeks: 'all', sourceKey: null, date: '2026-09-07' },
 		],
 		holidays: getOfficialYears().flatMap((y) => OFFICIAL_HOLIDAYS[y].map((h) => ({ ...h }))),
 		adjustments: getOfficialYears().flatMap((y) =>
