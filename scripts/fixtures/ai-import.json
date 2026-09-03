@@ -1,0 +1,15 @@
+这是 AI 的返回结果，可以直接整段粘贴到应用（示例大学，合成数据）：
+```json
+{"courses":[
+ {"name":"高等数学","teacher":"张老师","classroom":"教1-101","weekday":1,"startSection":1,"endSection":2,"weeks":"1-16"},
+ {"name":"大学英语","teacher":"李老师","classroom":"教2-305","weekday":1,"startSection":3,"endSection":4,"weeks":"odd"},
+ {"name":"体育·羽毛球","teacher":"陈老师","classroom":"体育馆","weekday":2,"startSection":5,"endSection":6,"weeks":"5-8"},
+ {"name":"操作系统","teacher":"万老师","classroom":"信工207","weekday":5,"startSection":3,"endSection":4,"weeks":"1,3,5,7"},
+ {"name":"操作系统","teacher":"万老师","classroom":"2403","weekday":5,"startSection":3,"endSection":4,"weeks":"2,4,6,8"},
+ {"name":"形势与政策","teacher":"苏老师","classroom":"报告厅3","weekday":2,"startSection":5,"endSection":6,"weeks":"13-16周"},
+ {"name":"问题课程","teacher":"","classroom":"","weekday":1,"startSection":9,"endSection":10,"weeks":"莫名其妙"},
+ {"name":"","teacher":"x","classroom":"y","weekday":1,"startSection":1,"endSection":1,"weeks":"all"},
+ {"name":"非法星期","weekday":8,"startSection":1,"endSection":1,"weeks":"all"},
+ {"name":"空周次","weekday":3,"startSection":7,"endSection":8,"weeks":""}
+]}
+```
