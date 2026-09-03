@@ -43,20 +43,20 @@
 							@click="onCellClick(di, si)"
 						></view>
 					</view>
-				</view>
 
-				<!-- 课程块（绝对定位，同节次多课横向均分并排） -->
-				<view
-					v-for="item in layoutItems"
-					:key="item.course.id + item.date"
-					class="course-slot"
-					:style="{ top: item.top, left: item.left, width: item.width, height: item.height }"
-				>
-					<course-card
-						:course="item.course"
-						:compact="item.compact"
-						@click="$emit('courseClick', item.course)"
-					/>
+					<!-- 课程块（绝对定位在 7 列区域内，同节次多课横向均分并排） -->
+					<view
+						v-for="item in layoutItems"
+						:key="item.course.id + item.date"
+						class="course-slot"
+						:style="{ top: item.top, left: item.left, width: item.width, height: item.height }"
+					>
+						<course-card
+							:course="item.course"
+							:compact="item.compact"
+							@click="$emit('courseClick', item.course)"
+						/>
+					</view>
 				</view>
 
 				<!-- 当前时间参考线 -->
@@ -142,10 +142,12 @@ function groupOverlaps(list) {
 }
 
 /**
- * 计算全部课程块的几何布局
- * 同组课程横向均分：第 k 个占 left = k/n*100%、width = 100/n%；
+ * 计算全部课程块的几何布局（参照系为 cells-area 的 7 列区域）
+ * 星期列：left = 列起点 + 组内均分位置；width = 单列宽 / 组内课程数；
  * 纵向 top/height 由节次区间换算。
  */
+const DAY_COL = 100 / 7; // 每列占 cells-area 的百分比（周一~周日均分）
+
 const layoutItems = computed(() => {
 	const items = [];
 	props.weekDates.forEach((date, di) => {
@@ -161,8 +163,8 @@ const layoutItems = computed(() => {
 					col: di,
 					top: `${(course.startSection - 1) * ROW_H}rpx`,
 					height: `${(course.endSection - course.startSection + 1) * ROW_H}rpx`,
-					left: `calc(${(k * 100) / n}% + ${(k * 100) / n === 0 ? 2 : 2}rpx)`,
-					width: n === 1 ? 'calc(100% - 4rpx)' : `calc(${100 / n}% - ${2 + 2 / n}rpx)`,
+					left: `calc(${di * DAY_COL + (k * DAY_COL) / n}% + 2rpx)`,
+					width: `calc(${DAY_COL / n}% - ${4 / n}rpx)`,
 					compact: n > 1,
 				});
 			});
