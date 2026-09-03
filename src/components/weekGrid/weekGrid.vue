@@ -82,6 +82,7 @@
  * 与日历页、当日弹窗完全一致。
  */
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import courseCard from '../courseCard/courseCard.vue';
 import { useData } from '../../store/useData.js';
 import { getCoursesOfDate } from '../../utils/filter.js';
 import { WEEKDAY_NAMES, todayStr, formatMDShort, timeToMinutes, sectionsOverlap } from '../../utils/time.js';
