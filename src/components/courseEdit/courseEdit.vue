@@ -50,7 +50,20 @@
 					<text class="form-label">生效范围</text>
 					<view class="week-chips">
 						<view class="chip" :class="{ active: form.scope === 'weekly' }" @click="onScopeChange('weekly')">每周</view>
+						<view v-if="isEdit && !form.originalDate" class="chip" :class="{ active: form.scope === 'range' }" @click="onScopeChange('range')">周段</view>
 						<view class="chip" :class="{ active: form.scope === 'once' }" @click="onScopeChange('once')">单次</view>
+					</view>
+					<view v-if="form.scope === 'range'" class="custom-weeks">
+						<view class="range-pickers">
+							<picker mode="selector" :range="weekOptions" :value="form.rangeStart - 1" @change="onRangeStartChange">
+								<view class="date-box">第 {{ form.rangeStart }} 周</view>
+							</picker>
+							<text class="range-sep">至</text>
+							<picker mode="selector" :range="weekOptions" :value="form.rangeEnd - 1" @change="onRangeEndChange">
+								<view class="date-box">第 {{ form.rangeEnd }} 周</view>
+							</picker>
+						</view>
+						<text class="scope-tip">{{ scopeTip }}</text>
 					</view>
 					<view v-if="form.scope === 'once'" class="custom-weeks">
 						<picker mode="date" :value="form.onceDate" @change="(e) => (form.onceDate = e.detail.value)">
@@ -154,7 +167,7 @@
  */
 import { ref, reactive, watch, computed } from 'vue';
 import { WEEKDAY_NAMES, todayStr } from '../../utils/time.js';
-import { describeWeeks, parseWeeksPattern } from '../../utils/weeksPattern.js';
+import { describeWeeks, parseWeeksPattern, intersectWeeksRange } from '../../utils/weeksPattern.js';
 
 const props = defineProps({
 	show: { type: Boolean, default: false },
@@ -165,6 +178,8 @@ const props = defineProps({
 	dateContext: { type: String, default: '' },
 	/** 节次总数（来自 config.sections） */
 	sectionsCount: { type: Number, default: 12 },
+	/** 周段选择的最大周号（「周段」模式起止周范围） */
+	maxWeek: { type: Number, default: 20 },
 });
 const emit = defineEmits(['close', 'save', 'remove', 'copy']);
 
@@ -193,9 +208,11 @@ const form = reactive({
 	weekType: 'all',
 	customPattern: '1-16',
 	remark: '',
-	/** 生效范围：weekly 每周 / once 单次（仅所选日期生效） */
+	/** 生效范围：weekly 每周 / range 周段（拆分修改）/ once 单次（仅所选日期生效） */
 	scope: 'weekly',
 	onceDate: '',
+	rangeStart: 1,
+	rangeEnd: 20,
 	/** 原课程是否一次性课（编辑既有一次性课时保留 date/overrideId） */
 	originalDate: null,
 	originalOverrideId: null,
@@ -237,6 +254,8 @@ function initForm() {
 	form.originalOverrideId = c ? c.overrideId || null : null;
 	form.scope = form.originalDate ? 'once' : 'weekly';
 	form.onceDate = form.originalDate || (pre && pre.date) || props.dateContext || todayStr();
+	form.rangeStart = 1;
+	form.rangeEnd = props.maxWeek;
 
 	if (c && c.weeks) {
 		const p = c.weeks;
@@ -260,8 +279,27 @@ function onScopeChange(scope) {
 	form.scope = scope;
 }
 
-/** 单次模式提示文案 */
+/** 周段选择器选项：第 1 周 ~ 第 maxWeek 周 */
+const weekOptions = computed(() =>
+	Array.from({ length: props.maxWeek }, (_, i) => `第 ${i + 1} 周`)
+);
+
+function onRangeStartChange(e) {
+	const v = Number(e.detail.value) + 1;
+	form.rangeStart = v;
+	if (form.rangeEnd < v) form.rangeEnd = v;
+}
+
+function onRangeEndChange(e) {
+	const v = Number(e.detail.value) + 1;
+	form.rangeEnd = Math.max(v, form.rangeStart);
+}
+
+/** 生效范围提示文案 */
 const scopeTip = computed(() => {
+	if (form.scope === 'range') {
+		return `保存后拆分为两段：第 ${form.rangeStart}-${form.rangeEnd} 周使用当前信息，其余周自动保留原信息`;
+	}
 	if (!isEdit.value) return '仅所选日期生效的一次性课（临时课）';
 	if (!form.originalDate) return '保存后将作为仅该日期生效的一次性课，原每周课在其他日期不受影响';
 	return '该一次性课仅所选日期生效';
@@ -286,6 +324,33 @@ function onSave() {
 	const name = String(form.name || '').trim();
 	if (!name) {
 		uni.showToast({ title: '请填写课程名称', icon: 'none' });
+		return;
+	}
+	// 周段拆分：编辑每周课切「周段」保存 → 拆成修改段 + 剩余周（父级调 splitCourseRange）
+	if (form.scope === 'range') {
+		if (!isEdit.value || form.originalDate) {
+			uni.showToast({ title: '周段修改仅适用于每周课程', icon: 'none' });
+			return;
+		}
+		if (!intersectWeeksRange(props.course.weeks || 'all', form.rangeStart, form.rangeEnd)) {
+			uni.showToast({ title: `原课在第 ${form.rangeStart}-${form.rangeEnd} 周没有课程`, icon: 'none' });
+			return;
+		}
+		emit('save', {
+			splitRange: true,
+			originalId: form.id,
+			rangeStart: form.rangeStart,
+			rangeEnd: form.rangeEnd,
+			name,
+			teacher: String(form.teacher || '').trim(),
+			classroom: String(form.classroom || '').trim(),
+			color: form.color,
+			weekday: form.weekday,
+			startSection: form.startSection,
+			endSection: form.endSection,
+			weeks: 'all',
+			remark: String(form.remark || '').trim(),
+		});
 		return;
 	}
 	// 单次模式：必须选生效日期
@@ -539,6 +604,17 @@ function onDelete() {
 		padding: 10rpx 24rpx;
 		font-size: 26rpx;
 		color: #303133;
+	}
+
+	.range-pickers {
+		display: flex;
+		align-items: center;
+		gap: 12rpx;
+
+		.range-sep {
+			font-size: 24rpx;
+			color: #909399;
+		}
 	}
 
 	.scope-tip {

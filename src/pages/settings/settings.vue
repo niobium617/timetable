@@ -110,7 +110,7 @@
 		<view class="tt-card">
 			<view class="tt-card-title">假期管理</view>
 			<view v-if="data.holidays.length === 0" class="tt-empty">暂无假期</view>
-			<view v-for="h in data.holidays" :key="h.date" class="list-row">
+			<view v-for="h in holidayList" :key="h.date" class="list-row">
 				<view class="list-main">
 					<text class="list-title">{{ h.name }}</text>
 					<text class="list-sub">{{ h.date }}</text>
@@ -118,6 +118,10 @@
 				<view class="list-del" @click="onDeleteHoliday(h)">
 					<u-icon name="trash" size="18" color="#c0c4cc"></u-icon>
 				</view>
+			</view>
+			<view v-if="data.holidays.length > LIST_LIMIT" class="list-toggle" @click="holidayExpanded = !holidayExpanded">
+				<text>{{ holidayExpanded ? '收起' : `展开全部（${data.holidays.length} 天）` }}</text>
+				<u-icon :name="holidayExpanded ? 'arrow-up' : 'arrow-down'" size="12" color="#909399"></u-icon>
 			</view>
 
 			<view class="add-form">
@@ -144,7 +148,7 @@
 		<view class="tt-card">
 			<view class="tt-card-title">调休管理</view>
 			<view v-if="data.adjustments.length === 0" class="tt-empty">暂无调休</view>
-			<view v-for="a in data.adjustments" :key="a.date" class="list-row">
+			<view v-for="a in adjustList" :key="a.date" class="list-row">
 				<view class="list-main">
 					<text class="list-title">{{ a.date }} 补{{ weekdayName(a.targetWeekday) }}的课</text>
 					<text class="list-sub">{{ a.remark || '调休' }}</text>
@@ -152,6 +156,10 @@
 				<view class="list-del" @click="onDeleteAdjustment(a)">
 					<u-icon name="trash" size="18" color="#c0c4cc"></u-icon>
 				</view>
+			</view>
+			<view v-if="data.adjustments.length > LIST_LIMIT" class="list-toggle" @click="adjustExpanded = !adjustExpanded">
+				<text>{{ adjustExpanded ? '收起' : `展开全部（${data.adjustments.length} 条）` }}</text>
+				<u-icon :name="adjustExpanded ? 'arrow-up' : 'arrow-down'" size="12" color="#909399"></u-icon>
 			</view>
 
 			<view class="add-form">
@@ -503,6 +511,15 @@ function onDeleteHoliday(h) {
 const adjustForm = reactive({ date: '', weekday: 1, remark: '' });
 /** 已有官方节假日数据的年份（设置页按钮按此渲染） */
 const officialYears = getOfficialYears();
+
+/* ==================== 假期/调休列表折叠 ==================== */
+
+/** 列表默认展示条数，超出折叠 */
+const LIST_LIMIT = 5;
+const holidayExpanded = ref(false);
+const adjustExpanded = ref(false);
+const holidayList = computed(() => (holidayExpanded.value ? data.holidays : data.holidays.slice(0, LIST_LIMIT)));
+const adjustList = computed(() => (adjustExpanded.value ? data.adjustments : data.adjustments.slice(0, LIST_LIMIT)));
 /** 调休建议提示（选日期后自动推算，见 suggestAdjustWeekday） */
 const adjustHint = ref('');
 const adjustSuggestion = ref(null);
@@ -896,6 +913,21 @@ const stats = computed(() => {
 
 .official-btn {
 	margin-top: 16rpx;
+}
+
+/* 折叠切换 */
+.list-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6rpx;
+	padding: 16rpx 0 4rpx;
+	font-size: 22rpx;
+	color: #909399;
+
+	&:active {
+		opacity: 0.8;
+	}
 }
 
 /* 数据管理 */

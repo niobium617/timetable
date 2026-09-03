@@ -53,6 +53,7 @@
 			:course="editCourse"
 			:prefill="editPrefill"
 			:date-context="editDateContext"
+			:max-week="maxWeek"
 			:sections-count="data.config.sections.length"
 			@close="editShow = false"
 			@save="onCourseSave"
@@ -83,6 +84,7 @@ const {
 	updateCourse,
 	deleteCourse,
 	copyCourse,
+	splitCourseRange,
 } = useData();
 
 const hasTerm = computed(() => !!data.config.termStartDate);
@@ -214,6 +216,18 @@ function onCellClick({ weekday, section, date }) {
 }
 
 function onCourseSave(payload) {
+	// 周段拆分：拆成「修改段 + 剩余周」，失败不关闭弹窗
+	if (payload.splitRange) {
+		const { splitRange, originalId, rangeStart, rangeEnd, ...patch } = payload;
+		const r = splitCourseRange(originalId, patch, rangeStart, rangeEnd);
+		if (!r.ok) {
+			uni.showToast({ title: r.error || '拆分失败', icon: 'none', duration: 2500 });
+			return;
+		}
+		uni.showToast({ title: r.remainder ? '已拆分保存：所选周段使用新信息' : '已保存（覆盖全部周次）', icon: 'success' });
+		editShow.value = false;
+		return;
+	}
 	if (payload.id) {
 		const { id, ...patch } = payload;
 		updateCourse(id, patch);

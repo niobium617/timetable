@@ -13,6 +13,7 @@ import { parseTimetable, Parser } from '../src/utils/parser.js';
 import { matchIncremental, mergeCourses, findConflicts } from '../src/utils/importMatch.js';
 import { suggestAdjustWeekday } from '../src/utils/holiday.js';
 import { getCoursesOfDate } from '../src/utils/filter.js';
+import { intersectWeeksRange, subtractWeeksRange } from '../src/utils/weeksPattern.js';
 import { OFFICIAL_HOLIDAYS, OFFICIAL_ADJUSTMENTS, getOfficialYears } from '../src/utils/officialHolidays.js';
 import { getWeekday } from '../src/utils/time.js';
 
@@ -189,6 +190,18 @@ assert(r6.length === 0, '假期当天一次性课同样不显示');
 // 调休日：每周课按 targetWeekday 重映射，一次性课独立显示
 let r7 = getCoursesOfDate('2026-09-12', { ...baseData, adjustments: [{ date: '2026-09-12', targetWeekday: 1 }], courses: [weeklyMath, { id: 'o4', name: '周六活动', weekday: 3, startSection: 7, endSection: 8, weeks: 'all', date: '2026-09-12', sourceKey: null }] });
 assert(r7.some((c) => c.id === 'w1') && r7.some((c) => c.id === 'o4'), '调休日每周课重映射 + 一次性课独立显示');
+
+console.log('== 周次集合运算（周段拆分）==');
+assert(intersectWeeksRange('all', 1, 4) === '1-4', 'all ∩ [1,4] = 1-4');
+assert(intersectWeeksRange('1-16', 1, 4) === '1-4', '1-16 ∩ [1,4] = 1-4');
+assert(intersectWeeksRange('odd', 1, 4) === '1,3', 'odd ∩ [1,4] = 1,3');
+assert(intersectWeeksRange('2-8,10-14', 5, 11) === '5-8,10-11', '多段 ∩ [5,11] = 5-8,10-11');
+assert(intersectWeeksRange('5-8', 1, 4) === null, '无交集 → null');
+assert(subtractWeeksRange('1-16', 1, 4) === '5-16', '1-16 − [1,4] = 5-16');
+assert(subtractWeeksRange('all', 1, 4, 16) === '5-16', 'all − [1,4]（maxWeek=16）= 5-16');
+assert(subtractWeeksRange('odd', 1, 4, 10) === '5,7,9', 'odd − [1,4]（maxWeek=10）= 5,7,9');
+assert(subtractWeeksRange('even', 1, 4, 8) === '6,8', 'even − [1,4]（maxWeek=8）= 6,8');
+assert(subtractWeeksRange('1-4', 1, 4) === null, '减完为空 → null');
 
 console.log('== suggestAdjustWeekday ==');
 const holidays = [{ date: '2026-10-01' }, { date: '2026-10-02' }, { date: '2026-10-03' }];

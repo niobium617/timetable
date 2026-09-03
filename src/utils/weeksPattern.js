@@ -89,3 +89,60 @@ export function describeWeeks(pattern) {
 	ranges.push(start === prev ? `${start}` : `${start}-${prev}`);
 	return `第 ${ranges.join('、')} 周 · 共${list.length}周`;
 }
+
+/* ==================== 周次集合运算（周段分段修改用） ==================== */
+
+/** 周次集合压缩为规范 weeks 字符串："1,3,5" / "1-4" / "2-8,10-14"；空集返回 null */
+function compressWeeks(set) {
+	if (!set || set.size === 0) return null;
+	const list = [...set].sort((a, b) => a - b);
+	const parts = [];
+	let start = list[0], prev = list[0];
+	for (let i = 1; i < list.length; i++) {
+		if (list[i] === prev + 1) { prev = list[i]; continue; }
+		parts.push(start === prev ? `${start}` : `${start}-${prev}`);
+		start = prev = list[i];
+	}
+	parts.push(start === prev ? `${start}` : `${start}-${prev}`);
+	return parts.join(',');
+}
+
+/** 展开周规则为周号集合（all/odd/even 按 maxWeek 截断展开） */
+function expandWeeks(pattern, maxWeek = 20) {
+	const { type, weeks } = parseWeeksPattern(pattern);
+	const set = new Set();
+	if (type === 'all') {
+		for (let w = 1; w <= maxWeek; w++) set.add(w);
+	} else if (type === 'odd') {
+		for (let w = 1; w <= maxWeek; w += 2) set.add(w);
+	} else if (type === 'even') {
+		for (let w = 2; w <= maxWeek; w += 2) set.add(w);
+	} else {
+		weeks.forEach((w) => set.add(w));
+	}
+	return set;
+}
+
+/**
+ * 周规则与 [a,b] 周段的交集（分段修改的"修改段"周次）
+ * @returns {string|null} 规范 weeks 字符串；交集为空返回 null
+ */
+export function intersectWeeksRange(pattern, a, b) {
+	const lo = Math.min(a, b), hi = Math.max(a, b);
+	const set = expandWeeks(pattern, hi);
+	for (let w = 1; w < lo; w++) set.delete(w);
+	for (let w = hi + 1; w <= Math.max(hi, 20); w++) set.delete(w);
+	return compressWeeks(set);
+}
+
+/**
+ * 周规则减去 [a,b] 周段（分段修改的"剩余周"）
+ * all/odd/even 为无界规则，按 maxWeek（默认 20）截断后再减
+ * @returns {string|null} 规范 weeks 字符串；减完为空返回 null
+ */
+export function subtractWeeksRange(pattern, a, b, maxWeek = 20) {
+	const lo = Math.min(a, b), hi = Math.max(a, b);
+	const set = expandWeeks(pattern, maxWeek);
+	for (let w = lo; w <= hi; w++) set.delete(w);
+	return compressWeeks(set);
+}

@@ -19,6 +19,7 @@ import {
 import { mergeCourses } from '../utils/importMatch.js';
 import { isValidWeeksPattern } from '../utils/week.js';
 import { OFFICIAL_HOLIDAYS, getOfficialYears } from '../utils/officialHolidays.js';
+import { intersectWeeksRange, subtractWeeksRange } from '../utils/weeksPattern.js';
 
 /** 导入课程自动配色（与 courseEdit 的 COURSE_COLORS 保持一致的色系） */
 const IMPORT_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#8e44ad', '#16a085', '#e84393', '#3498db', '#9c6b3c', '#909399'];
@@ -154,6 +155,40 @@ export function importCourses(list, mode, options = {}) {
 	return { ok, added, updated, holidaysAdded, error: ok ? undefined : '写入存储失败' };
 }
 
+/**
+ * 周段分段修改：把原课拆成「修改段 [start,end]（新信息）」+「剩余周（原信息）」
+ * - 剩余周非空：原课周次收窄为剩余周，修改段作为新课程追加
+ * - 剩余周为空：修改段覆盖全部周次 → 直接更新原课（保持 id）
+ * 拆分前自动备份（设置页「撤销导入」可恢复）。
+ * @param {string} originalId 原每周课 id
+ * @param {object} patch 修改段课程字段（不含 id/weeks）
+ * @param {number} start 修改段起始周
+ * @param {number} end 修改段结束周
+ * @returns {{ ok: boolean, remainder: boolean, error?: string }}
+ */
+export function splitCourseRange(originalId, patch, start, end) {
+	const src = data.courses.find((c) => c.id === originalId);
+	if (!src) return { ok: false, remainder: false, error: '原课程不存在' };
+
+	const rangeWeeks = intersectWeeksRange(src.weeks || 'all', start, end);
+	if (!rangeWeeks) {
+		return { ok: false, remainder: false, error: `原课在第 ${start}-${end} 周没有课程，无法拆分` };
+	}
+	const remainderWeeks = subtractWeeksRange(src.weeks || 'all', start, end);
+
+	if (!backupCurrent(data)) {
+		return { ok: false, remainder: false, error: '自动备份失败，已中止拆分' };
+	}
+
+	if (remainderWeeks) {
+		updateCourse(originalId, { weeks: remainderWeeks });
+		addCourse({ ...patch, weeks: rangeWeeks });
+		return { ok: true, remainder: true };
+	}
+	updateCourse(originalId, { ...patch, weeks: rangeWeeks });
+	return { ok: true, remainder: false };
+}
+
 /* ==================== 假期 / 调休 ==================== */
 
 /** 添加假期（支持批量日期数组） */
@@ -260,6 +295,7 @@ export function useData() {
 		updateCourse,
 		deleteCourse,
 		copyCourse,
+		splitCourseRange,
 		importCourses,
 		addHolidays,
 		deleteHoliday,
