@@ -69,6 +69,21 @@
 				</view>
 			</view>
 
+			<!-- 节次时间表（可选应用） -->
+			<view v-if="sectionsDiffer" class="tt-card">
+				<view class="tt-card-title">节次时间表</view>
+				<view class="sections-apply" @click="applySections = !applySections">
+					<view class="row-check" :class="{ checked: applySections }">
+						<text v-if="applySections">✓</text>
+					</view>
+					<view class="sections-main">
+						<text class="sections-title">同时应用课表中的节次时间（{{ result.sections.length }} 节）</text>
+						<text class="sections-preview">{{ sectionsPreview }}</text>
+					</view>
+				</view>
+				<view class="form-tip">课表标注了节次时间，勾选后导入时一并写入（当前节次时间表将被替换）</view>
+			</view>
+
 			<!-- 三组列表 -->
 			<view v-for="grp in ['add', 'update', 'unchanged']" :key="grp" class="tt-card" v-show="groups[grp].length">
 				<view class="tt-card-title">
@@ -132,14 +147,15 @@ const { data, importCourses } = useData();
 /** 标准提示词（通用，不含任何学校信息） */
 const AI_PROMPT =
 	'请识别这张课表图片，输出严格的 JSON（不要任何解释文字）：\n' +
-	'{"courses":[{"name":"课程名","teacher":"教师","classroom":"教室","weekday":1,"startSection":1,"endSection":2,"weeks":"1-16"}]}\n\n' +
+	'{"courses":[{"name":"课程名","teacher":"教师","classroom":"教室","weekday":1,"startSection":1,"endSection":2,"weeks":"1-16"}],"sections":[{"section":1,"startTime":"08:30","endTime":"09:15"}]}\n\n' +
 	'规则：\n' +
 	'1. weekday 用数字：1=周一，2=周二，3=周三，4=周四，5=周五，6=周六，7=周日\n' +
 	'2. 节次用小节编号；若课表按"大节"标注（如第一大节=第01-02小节），请换算：第一大节 startSection=1,endSection=2，第二大节 3-4，第三大节 5-6，第四大节 7-8，第五大节 9-10，以此类推\n' +
 	'3. weeks 取值："all" 每周；"odd" 单周；"even" 双周；区间如 "1-16"、"5-8"；不连续列表直接逗号分隔如 "2,4,6,8"；图片未标注周次用 "all"\n' +
 	'4. 同一门课同一节次在不同周次有不同教室（隔周轮换）时，拆成多条课程，分别写各自的 weeks 与 classroom\n' +
 	'5. 空白格忽略；教师/教室未标注用 ""；课程名保留括号内原文\n' +
-	'6. 只输出 JSON，可包在 ```json 代码块内';
+	'6. 若课表标注了节次起止时间（含"第一大节 08:30-10:00"这类大节时间），输出 sections 数组：把大节时间对半拆成两小节（每小节 45 分钟），如第一大节 08:30-10:00 → section 1: 08:30-09:15、section 2: 09:15-10:00；后续大节依此类推；未标注时间则 "sections":[]\n' +
+	'7. 只输出 JSON，可包在 ```json 代码块内';
 
 const source = ref('');
 const preview = ref(false);
@@ -148,6 +164,8 @@ const inputWarnings = ref([]);
 const mode = ref('merge');
 /** 被勾选排除的课程：key = `${组名}${下标}` */
 const excluded = reactive({});
+/** 是否同时应用解析出的节次时间表 */
+const applySections = ref(false);
 
 const groupTitle = { add: '新增', update: '更新', unchanged: '不变' };
 
@@ -161,6 +179,7 @@ function onParse() {
 	const r = parseTimetable(source.value);
 	result.value = r;
 	Object.keys(excluded).forEach((k) => delete excluded[k]);
+	applySections.value = false;
 	if (r.courses.length === 0) {
 		inputWarnings.value = r.warnings;
 		preview.value = false;
@@ -192,6 +211,20 @@ const modeTip = computed(() =>
 		? '增量导入：与现有课程按「名称+星期+开始节次」匹配，命中更新、未命中新增，其余课程保留'
 		: '覆盖导入：用勾选的解析结果替换全部课程（学期配置、假期、调休保留）'
 );
+
+/** 解析到的节次时间表与当前配置是否不同（不同才显示勾选卡） */
+const sectionsDiffer = computed(() => {
+	const s = result.value?.sections;
+	if (!s || s.length === 0) return false;
+	const cur = data.config.sections || [];
+	if (cur.length !== s.length) return true;
+	return s.some((x, i) => x.startTime !== cur[i].startTime || x.endTime !== cur[i].endTime);
+});
+
+const sectionsPreview = computed(() => {
+	const s = result.value?.sections || [];
+	return s.slice(0, 4).map((x) => `${x.section}:${x.startTime}-${x.endTime}`).join(' · ') + (s.length > 4 ? ' …' : '');
+});
 
 /* ==================== 勾选与冲突 ==================== */
 
@@ -288,15 +321,18 @@ function onConfirm() {
 		if (!isExcluded('update', idx)) incoming.push(u.parsed);
 	});
 	const isMerge = mode.value === 'merge';
+	const useSections = applySections.value && sectionsDiffer.value;
 	uni.showModal({
 		title: isMerge ? '增量导入' : '覆盖导入',
 		content: isMerge
-			? `将新增/更新 ${incoming.length} 门课程（其余课程保留）。导入前自动备份，可在设置页「撤销导入」。`
-			: `将以解析结果替换全部课程（当前 ${data.courses.length} 门将被移除；学期配置、假期、调休保留）。导入前自动备份，可在设置页「撤销导入」。`,
+			? `将新增/更新 ${incoming.length} 门课程（其余课程保留）${useSections ? '，并应用课表中的节次时间表' : ''}。导入前自动备份，可在设置页「撤销导入」。`
+			: `将以解析结果替换全部课程（当前 ${data.courses.length} 门将被移除；学期配置、假期、调休保留）${useSections ? '，并应用课表中的节次时间表' : ''}。导入前自动备份，可在设置页「撤销导入」。`,
 		confirmColor: isMerge ? '#409eff' : '#f56c6c',
 		success: (res) => {
 			if (!res.confirm) return;
-			const r = importCourses(incoming, mode.value);
+			const r = importCourses(incoming, mode.value, {
+				sections: useSections ? result.value.sections : undefined,
+			});
 			if (!r.ok) {
 				uni.showToast({ title: r.error || '导入失败', icon: 'none', duration: 2500 });
 				return;
@@ -437,6 +473,33 @@ function onConfirm() {
 	margin-top: 16rpx;
 	font-size: 24rpx;
 	color: #303133;
+}
+
+/* 节次时间表勾选 */
+.sections-apply {
+	display: flex;
+	align-items: flex-start;
+	gap: 16rpx;
+	padding: 16rpx 0;
+
+	.sections-main {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 8rpx;
+	}
+
+	.sections-title {
+		font-size: 26rpx;
+		font-weight: 600;
+		color: #303133;
+	}
+
+	.sections-preview {
+		font-size: 22rpx;
+		color: #909399;
+		line-height: 1.5;
+	}
 }
 
 /* 分组 */

@@ -42,15 +42,16 @@ export function parseTimetable(source) {
 	}
 
 	// 兼容两种形状：{courses:[...]} 或直接 [...]
-	const list =
-		parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.courses)
-			? parsed.courses
-			: Array.isArray(parsed)
-			? parsed
-			: null;
+	const isWrapped = parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+	const list = isWrapped && Array.isArray(parsed.courses) ? parsed.courses : Array.isArray(parsed) ? parsed : null;
 	if (!list) {
 		result.warnings.push('JSON 中未找到 courses 数组，请确认 AI 按提示词格式输出');
 		return result;
+	}
+
+	// 节次时间表（可选）：AI 识别课表标注的时间输出 sections
+	if (isWrapped && parsed.sections != null) {
+		result.sections = normalizeSections(parsed.sections, result.warnings);
 	}
 
 	list.forEach((item, i) => {
@@ -92,6 +93,38 @@ export function parseTimetable(source) {
 		result.warnings.push('未解析到课程');
 	}
 	return result;
+}
+
+/**
+ * 节次时间表归一化：校验 {section, startTime, endTime}，去重按节次排序
+ * @returns {Array<{section:number, startTime:string, endTime:string}>}
+ */
+function normalizeSections(raw, warnings) {
+	const out = [];
+	const seen = new Set();
+	if (!Array.isArray(raw)) return out;
+	raw.forEach((s, i) => {
+		if (!s || typeof s !== 'object') {
+			warnings.push(`sections 第 ${i + 1} 项不是对象，已跳过`);
+			return;
+		}
+		const section = Math.round(Number(s.section));
+		const startTime = String(s.startTime || '').trim();
+		const endTime = String(s.endTime || '').trim();
+		if (
+			!(section >= 1 && section <= 30) ||
+			!/^\d{1,2}:\d{2}$/.test(startTime) ||
+			!/^\d{1,2}:\d{2}$/.test(endTime)
+		) {
+			warnings.push(`sections 第 ${i + 1} 项格式非法，已跳过`);
+			return;
+		}
+		if (seen.has(section)) return; // 重复节次取第一条
+		seen.add(section);
+		out.push({ section, startTime, endTime });
+	});
+	out.sort((a, b) => a.section - b.section);
+	return out;
 }
 
 /**

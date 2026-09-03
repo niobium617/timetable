@@ -100,12 +100,14 @@ function normalizeImported(c, index) {
  * 导入前自动备份当前数据（设置页「撤销导入」可恢复），单次持久化。
  * @param {Array} list 解析出的课程
  * @param {'replace'|'merge'} mode
+ * @param {{ sections?: Array }} options 可选：同时应用解析出的节次时间表
  * @returns {{ ok: boolean, added: number, updated: number, error?: string }}
  */
-export function importCourses(list, mode) {
+export function importCourses(list, mode, options = {}) {
 	let nextCourses;
 	let added = 0;
 	let updated = 0;
+	const applySections = Array.isArray(options.sections) && options.sections.length > 0;
 
 	if (mode === 'replace') {
 		nextCourses = list.map((c, i) => normalizeImported(c, i));
@@ -114,7 +116,7 @@ export function importCourses(list, mode) {
 		const m = mergeCourses(list, data.courses);
 		added = m.add.length;
 		updated = m.update.length;
-		if (added === 0 && updated === 0) {
+		if (added === 0 && updated === 0 && !applySections) {
 			return { ok: true, added: 0, updated: 0 }; // 无变更，不触碰存储
 		}
 		// 仅归一化新增课程（无 id）；已存在课程保持原对象（更新已由 mergeCourses 合并语义字段）
@@ -128,6 +130,9 @@ export function importCourses(list, mode) {
 	}
 
 	data.courses.splice(0, data.courses.length, ...nextCourses);
+	if (applySections) {
+		data.config.sections = options.sections;
+	}
 	const ok = saveData(data); // 失败时 saveData 已提示；备份仍在，可撤销
 	return { ok, added, updated, error: ok ? undefined : '写入存储失败' };
 }

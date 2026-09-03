@@ -50,6 +50,14 @@ assert(r.courses.find((c) => c.name === '空周次')?.weeks === 'all', '空周�
 assert(r.warnings.some((w) => w.includes('问题课程')), '非法周次有警告');
 assert(r.warnings.some((w) => w.includes('非法星期')), '非法 weekday 有警告');
 
+console.log('== sections（节次时间表）==');
+assert(r.sections.length === 10, `解析出 10 节时间（实际 ${r.sections.length}）`);
+assert(r.sections[0].startTime === '08:30' && r.sections[0].endTime === '09:15', '第 1 节时间正确');
+assert(r.sections[9].section === 10 && r.sections[9].endTime === '20:30', '第 10 节时间正确（大节对半拆）');
+assert(r.sections.every((s, i) => i === 0 || s.section > r.sections[i - 1].section), '按节次排序且无重复');
+assert(r.warnings.some((w) => w.includes('sections')), '非法 section 项有警告');
+assert(parseTimetable('{"courses":[]}').sections.length === 0, '无 sections 字段 → 空数组');
+
 console.log('== parseTimetable 边界 ==');
 assert(parseTimetable('').courses.length === 0 && parseTimetable('').warnings.length > 0, '空输入 → 空结果+警告');
 assert(parseTimetable('你好世界').warnings.length > 0, '非 JSON → 警告不抛异常');
