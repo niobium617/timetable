@@ -9,7 +9,7 @@
  *
  * 学期起始日 2026-08-31 为周一（2026-09-01 即开学第1周周二）。
  */
-import { OFFICIAL_HOLIDAYS_2026, OFFICIAL_ADJUSTMENTS_2026 } from '../utils/officialHolidays.js';
+import { OFFICIAL_HOLIDAYS, OFFICIAL_ADJUSTMENTS, getOfficialYears } from '../utils/officialHolidays.js';
 import { suggestAdjustWeekday } from '../utils/holiday.js';
 
 /** 默认节次时间表：12 节，覆盖常见大学作息 */
@@ -58,11 +58,15 @@ export function sampleData() {
 			{ id: 'c_demo_12', name: '物理实验', teacher: '吴老师', classroom: '实验楼A-203', color: '#8e44ad', remark: '', weekday: 5, startSection: 5, endSection: 6, weeks: 'even', sourceKey: null },
 			{ id: 'c_demo_13', name: '高等数学答疑', teacher: '张老师', classroom: '教1-101', color: '#409eff', remark: '答疑课', weekday: 5, startSection: 7, endSection: 8, weeks: '1-16', sourceKey: null },
 		],
-		holidays: OFFICIAL_HOLIDAYS_2026.map((h) => ({ ...h })),
-		adjustments: OFFICIAL_ADJUSTMENTS_2026.map((a) => ({
-			date: a.date,
-			targetWeekday: suggestAdjustWeekday(a.date, OFFICIAL_HOLIDAYS_2026)?.weekday || 1,
-			remark: a.remark,
-		})),
+		holidays: getOfficialYears().flatMap((y) => OFFICIAL_HOLIDAYS[y].map((h) => ({ ...h }))),
+		adjustments: getOfficialYears().flatMap((y) =>
+			OFFICIAL_ADJUSTMENTS[y]
+				? OFFICIAL_ADJUSTMENTS[y].map((a) => ({
+						date: a.date,
+						targetWeekday: suggestAdjustWeekday(a.date, OFFICIAL_HOLIDAYS[y])?.weekday || 1,
+						remark: a.remark,
+					}))
+				: []
+		),
 	};
 }

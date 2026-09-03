@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseTimetable, Parser } from '../src/utils/parser.js';
 import { matchIncremental, mergeCourses, findConflicts } from '../src/utils/importMatch.js';
 import { suggestAdjustWeekday } from '../src/utils/holiday.js';
-import { OFFICIAL_HOLIDAYS_2026, OFFICIAL_ADJUSTMENTS_2026 } from '../src/utils/officialHolidays.js';
+import { OFFICIAL_HOLIDAYS, OFFICIAL_ADJUSTMENTS, getOfficialYears } from '../src/utils/officialHolidays.js';
 import { getWeekday } from '../src/utils/time.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -135,17 +135,20 @@ assert(findConflicts([
 	{ name: 'b', weekday: 1, startSection: 5, endSection: 6, weeks: '8-16' },
 ]).length === 1, '区间在第 8 周相交 → 冲突');
 
-console.log('== 官方节假日数据（2026）==');
-assert(OFFICIAL_HOLIDAYS_2026.length === 33, `官方假期 33 天（实际 ${OFFICIAL_HOLIDAYS_2026.length}）`);
-assert(new Set(OFFICIAL_HOLIDAYS_2026.map((h) => h.date)).size === 33, '假期日期无重复');
-assert(OFFICIAL_HOLIDAYS_2026.every((h) => h.name), '每个假期都有节日名');
-assert(OFFICIAL_HOLIDAYS_2026.some((h) => h.date === '2026-10-01' && h.name === '国庆节'), '国庆节 10/1 在内');
-assert(OFFICIAL_HOLIDAYS_2026.some((h) => h.date === '2026-10-07' && h.name === '国庆节'), '国庆节 10/7（共 7 天）在内');
-assert(OFFICIAL_HOLIDAYS_2026.some((h) => h.date === '2026-09-25' && h.name === '中秋节'), '中秋节 9/25 在内');
-assert(OFFICIAL_HOLIDAYS_2026.some((h) => h.date === '2026-02-15' && h.name === '春节'), '春节 2/15 在内');
-assert(OFFICIAL_ADJUSTMENTS_2026.length === 6, `官方调休上班日 6 个（实际 ${OFFICIAL_ADJUSTMENTS_2026.length}）`);
-assert(OFFICIAL_ADJUSTMENTS_2026.every((a) => getWeekday(a.date) >= 6), '调休上班日均为周六/周日');
-assert(OFFICIAL_ADJUSTMENTS_2026.every((a) => suggestAdjustWeekday(a.date, OFFICIAL_HOLIDAYS_2026) != null), '每个调休日都能推算补课星期');
+console.log('== 官方节假日数据（按年份组织）==');
+assert(getOfficialYears().length === 1 && getOfficialYears()[0] === '2026', `年份列表 = [2026]（实际 ${JSON.stringify(getOfficialYears())}）`);
+const H26 = OFFICIAL_HOLIDAYS['2026'];
+const A26 = OFFICIAL_ADJUSTMENTS['2026'];
+assert(H26.length === 33, `2026 官方假期 33 天（实际 ${H26.length}）`);
+assert(new Set(H26.map((h) => h.date)).size === 33, '假期日期无重复');
+assert(H26.every((h) => h.name), '每个假期都有节日名');
+assert(H26.some((h) => h.date === '2026-10-01' && h.name === '国庆节'), '国庆节 10/1 在内');
+assert(H26.some((h) => h.date === '2026-10-07' && h.name === '国庆节'), '国庆节 10/7（共 7 天）在内');
+assert(H26.some((h) => h.date === '2026-09-25' && h.name === '中秋节'), '中秋节 9/25 在内');
+assert(H26.some((h) => h.date === '2026-02-15' && h.name === '春节'), '春节 2/15 在内');
+assert(A26.length === 6, `2026 官方调休上班日 6 个（实际 ${A26.length}）`);
+assert(A26.every((a) => getWeekday(a.date) >= 6), '调休上班日均为周六/周日');
+assert(A26.every((a) => suggestAdjustWeekday(a.date, H26) != null), '每个调休日都能推算补课星期');
 
 console.log('== suggestAdjustWeekday ==');
 const holidays = [{ date: '2026-10-01' }, { date: '2026-10-02' }, { date: '2026-10-03' }];
