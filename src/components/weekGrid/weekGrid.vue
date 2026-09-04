@@ -29,6 +29,7 @@
 					<view v-for="s in sections" :key="s.section" class="time-cell">
 						<text class="time-num">{{ s.section }}</text>
 						<text class="time-range">{{ s.startTime }}</text>
+						<text class="time-range time-end">{{ s.endTime }}</text>
 					</view>
 				</view>
 
@@ -340,6 +341,10 @@ watch(() => props.weekDates, updateNowLine);
 			color: #c0c4cc;
 			line-height: 1.3;
 			transform: scale(0.92);
+		}
+
+		.time-end {
+			color: #dcdfe6;
 		}
 	}
 }
