@@ -23,15 +23,17 @@
 			<view class="guide-btn" @click="goSettings">去设置学期起始日期</view>
 		</view>
 
-		<!-- 周课表：swiper 预渲染 上/当前/下 三页 -->
+		<!-- 周课表：每个教学周一个真实页面，原生滑动无瞬移复位 -->
 		<swiper
 			v-else
 			class="week-swiper"
 			:current="swiperCurrent"
-			:duration="swipeDuration"
+			:duration="400"
 			:circular="false"
+			:skip-hidden-item-layout="true"
 			@change="onSwiperChange"
 		>
+			<!-- key 按周号固定：页面列表只增删不重排，实例稳定复用 -->
 			<swiper-item v-for="page in pages" :key="'w' + page.weekNum">
 				<week-grid
 					:week-dates="page.dates"
@@ -42,7 +44,7 @@
 		</swiper>
 
 		<!-- 回到本周 -->
-		<view v-if="weekOffset !== 0" class="back-week" @click="backToThisWeek">
+		<view v-if="swiperCurrent + 1 !== currentWeekNum" class="back-week" @click="backToThisWeek">
 			<u-icon name="arrow-leftward" size="18" color="#ffffff"></u-icon>
 			<text>本周</text>
 		</view>
@@ -70,7 +72,7 @@
  * - 顶部展示当前教学周号、单双周标识与日期范围
  * - 点击课程块编辑、点击空白格快速新增、回到本周按钮
  */
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useData } from '../../store/useData.js';
 import { getWeekInfo, getWeekDates } from '../../utils/week.js';
 import { parseWeeksPattern } from '../../utils/weeksPattern.js';
@@ -112,33 +114,35 @@ const maxWeek = computed(() => {
 	return Math.max(max, currentWeekNum.value);
 });
 
-/** 相对当前周偏移；初始即钳制：学期开始前打开时直接落在第 1 周，不出现 0 或负数周 */
-const weekOffset = ref(Math.max(0, 1 - currentWeekNum.value));
-const swiperCurrent = ref(1); // 始终指向中间页；滑动结束后瞬移回 1
-const swipeDuration = ref(220); // 瞬移回中间页时临时置 0，避免产生回滑动画
+/** 当前查看的周次页下标（0 起）。初始即钳制：学期开始前打开时落在第 1 周（下标 0） */
+const swiperCurrent = ref(Math.max(0, currentWeekNum.value - 1));
 
-/** 周页缓存：weekNum -> 页对象，相邻周切换时引用稳定，已渲染页不重算 */
+/** 周页缓存：weekNum -> 页对象，周次间切换时引用稳定，已渲染页不重算 */
 const weekPageCache = new Map();
 function getWeekPage(weekNum) {
 	let page = weekPageCache.get(weekNum);
 	if (!page) {
-		// 超出学期范围的侧页渲染空白，仅作为滑动到边界时的"橡皮筋"
-		const outOfRange = weekNum < 1 || weekNum > maxWeek.value;
-		page = {
-			weekNum,
-			dates: outOfRange ? [] : getWeekDates(weekNum, data.config.termStartDate),
-		};
+		page = { weekNum, dates: getWeekDates(weekNum, data.config.termStartDate) };
 		weekPageCache.set(weekNum, page);
 	}
 	return page;
 }
-// 学期起始日或最大周变化后，所有周页作废重建
-watch([() => data.config.termStartDate, maxWeek], () => weekPageCache.clear());
+// 学期起始日或最大周变化后，周页作废重建，并把当前页钳制回范围内
+watch([() => data.config.termStartDate, maxWeek], () => {
+	weekPageCache.clear();
+	swiperCurrent.value = Math.min(swiperCurrent.value, maxWeek.value - 1);
+});
 
+/**
+ * 每个教学周一个真实页面（1..maxWeek）：
+ * 原生滑动跟随手指、松手自然停靠、边界回弹，无任何瞬移复位，
+ * 不再有"弹过去"的手感；@change 仅回写 swiper 自身位置。
+ */
 const pages = computed(() => {
 	if (!hasTerm.value) return [];
-	const base = currentWeekNum.value + weekOffset.value;
-	return [base - 1, base, base + 1].map(getWeekPage);
+	const list = [];
+	for (let w = 1; w <= maxWeek.value; w++) list.push(getWeekPage(w));
+	return list;
 });
 
 /** 顶部信息（跟随当前查看周） */
@@ -146,7 +150,7 @@ const headerInfo = computed(() => {
 	if (!hasTerm.value) {
 		return { weekNum: 1, isOddWeek: true, isManual: false, rangeLabel: '' };
 	}
-	const weekNum = currentWeekNum.value + weekOffset.value;
+	const weekNum = swiperCurrent.value + 1;
 	const dates = getWeekDates(weekNum, data.config.termStartDate);
 	const { isOddWeek, isManual } = getWeekInfo(dates[0], data.config);
 	return {
@@ -157,36 +161,14 @@ const headerInfo = computed(() => {
 	};
 });
 
-/**
- * 滑动换周（H5 在松手时触发 change，小程序在动画结束后触发）：
- * 1) 先把 current 同步到实际滑到的位置（1→0/2），避免内容换页时被 swiper 重新拉回；
- * 2) 下一帧更新周偏移，并把 duration 置 0、current 复位到 1 —— 瞬移回中间页，
- *    视觉无缝，不会出现"滑过去又倒带"的回滑动画，也不会打断连续滑动；
- * 3) 恢复滑动动画时长。
- */
-async function onSwiperChange(e) {
-	const cur = e.detail.current;
-	if (cur === 1) return; // 程序复位回中间页触发的 change，忽略
-	swiperCurrent.value = cur;
-	await nextTick();
-	const base = currentWeekNum.value + weekOffset.value;
-	if (cur === 0) {
-		// 第 1 周为下限：再往前滑动只弹回，不产生 0/负数周
-		if (base - 1 >= 1) weekOffset.value -= 1;
-	} else {
-		// 学期最后一周为上限：再往后滑动只弹回
-		if (base + 1 <= maxWeek.value) weekOffset.value += 1;
-	}
-	swipeDuration.value = 0;
-	swiperCurrent.value = 1;
-	await nextTick();
-	swipeDuration.value = 220;
+/** 滑动换周：只回写 swiper 实际位置（H5 内容变化时不会因此被拉回） */
+function onSwiperChange(e) {
+	swiperCurrent.value = e.detail.current;
 }
 
 function backToThisWeek() {
 	// 与初始钳制一致：学期开始前"本周"落在第 1 周
-	weekOffset.value = Math.max(0, 1 - currentWeekNum.value);
-	swiperCurrent.value = 1;
+	swiperCurrent.value = Math.max(0, currentWeekNum.value - 1);
 }
 
 function goSettings() {
