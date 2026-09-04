@@ -201,7 +201,18 @@
 				<view class="btn-mini btn-plain" @click="onUndo">撤销导入</view>
 				<view class="btn-mini btn-danger" @click="onResetDemo">恢复示例</view>
 			</view>
-			<view class="form-tip">数据仅保存在本机；导入前会自动备份当前数据，可撤销</view>
+			<view class="form-tip">数据保存在本机；导入前会自动备份当前数据，可撤销</view>
+			<!-- #ifdef MP-WEIXIN -->
+			<view class="cloud-row">
+				<view class="btn-mini btn-plain" @click="onCloudBackup">云备份</view>
+				<view class="btn-mini btn-plain" @click="onCloudRestore">云恢复</view>
+				<text class="cloud-last">{{ cloudLastLabel }}</text>
+			</view>
+			<view class="form-tip">云备份存至微信云开发（按微信身份隔离），清缓存/换设备后用「云恢复」找回</view>
+			<!-- #endif -->
+			<!-- #ifndef MP-WEIXIN -->
+			<view class="form-tip">云备份功能需在微信小程序端使用</view>
+			<!-- #endif -->
 		</view>
 
 		<!-- ============ 关于 ============ -->
@@ -217,11 +228,21 @@
 			</view>
 			<view class="about-row">
 				<text class="about-label">存储位置</text>
+				<!-- #ifdef MP-WEIXIN -->
+				<text class="about-value">本机 + 微信云（已开通时）</text>
+				<!-- #endif -->
+				<!-- #ifndef MP-WEIXIN -->
 				<text class="about-value">本机本地</text>
+				<!-- #endif -->
 			</view>
 			<view class="about-row">
 				<text class="about-label">隐私</text>
+				<!-- #ifdef MP-WEIXIN -->
+				<text class="about-value">无账号体系；仅在你点击「云备份」时上传</text>
+				<!-- #endif -->
+				<!-- #ifndef MP-WEIXIN -->
 				<text class="about-value">无账号体系，数据不出设备</text>
+				<!-- #endif -->
 			</view>
 		</view>
 
@@ -275,6 +296,7 @@ import { getDisplayWeekInfo } from '../../utils/week.js';
 import { WEEKDAY_NAMES, parseDate, formatDate, addDays, todayStr, diffDays, getWeekday } from '../../utils/time.js';
 import { suggestAdjustWeekday } from '../../utils/holiday.js';
 import { OFFICIAL_HOLIDAYS, OFFICIAL_ADJUSTMENTS, getOfficialYears } from '../../utils/officialHolidays.js';
+import { cloudBackup, cloudFetch } from '../../utils/cloudBackup.js';
 
 // 每次进入页面时同步本地草稿（如导入/重置后返回）
 onShow(() => {
@@ -653,6 +675,58 @@ function onUndo() {
 	undoImport();
 }
 
+/* ---------- 云备份 / 云恢复（仅微信小程序端） ---------- */
+const CLOUD_LAST_KEY = 'timetable_cloud_last';
+const cloudLast = ref(Number(uni.getStorageSync(CLOUD_LAST_KEY)) || 0);
+
+const cloudLastLabel = computed(() =>
+	cloudLast.value ? `上次云备份 ${formatCloudTime(cloudLast.value)}` : '尚未云备份'
+);
+
+function formatCloudTime(ts) {
+	const d = new Date(ts);
+	const p = (n) => String(n).padStart(2, '0');
+	return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function onCloudBackup() {
+	uni.showLoading({ title: '云备份中' });
+	const r = await cloudBackup(exportData());
+	uni.hideLoading();
+	if (r.ok) {
+		cloudLast.value = Date.now();
+		uni.setStorageSync(CLOUD_LAST_KEY, cloudLast.value);
+		uni.showToast({ title: '云备份成功', icon: 'success' });
+	} else {
+		uni.showToast({ title: r.error || '云备份失败', icon: 'none', duration: 2500 });
+	}
+}
+
+function onCloudRestore() {
+	uni.showModal({
+		title: '云恢复',
+		content: '将用云端备份覆盖当前全部数据（恢复前自动备份，可撤销）',
+		confirmColor: '#409eff',
+		success: async (res) => {
+			if (!res.confirm) return;
+			uni.showLoading({ title: '下载中' });
+			const r = await cloudFetch();
+			uni.hideLoading();
+			if (!r.ok) {
+				uni.showToast({ title: r.error || '云恢复失败', icon: 'none', duration: 2500 });
+				return;
+			}
+			const result = importData(r.payload);
+			if (result.ok) {
+				syncLocalState();
+				uni.showToast({ title: '云恢复成功', icon: 'success' });
+			} else {
+				uni.showToast({ title: result.error || '恢复失败', icon: 'none', duration: 2500 });
+			}
+		},
+	});
+}
+
 function onResetDemo() {
 	uni.showModal({
 		title: '恢复示例数据',
@@ -935,6 +1009,20 @@ const stats = computed(() => {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 16rpx;
+}
+
+/* 云备份行 */
+.cloud-row {
+	display: flex;
+	align-items: center;
+	gap: 16rpx;
+	margin-top: 16rpx;
+
+	.cloud-last {
+		margin-left: auto;
+		font-size: 22rpx;
+		color: #c0c4cc;
+	}
 }
 
 /* 关于 */

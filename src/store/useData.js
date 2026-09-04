@@ -15,6 +15,7 @@ import {
 	restoreBackup,
 	resetToSample,
 	backupCurrent,
+	lastLoadWasFirstRun,
 } from './index.js';
 import { mergeCourses } from '../utils/importMatch.js';
 import { isValidWeeksPattern } from '../utils/week.js';
@@ -26,6 +27,8 @@ const IMPORT_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#8e44ad', '#
 
 // 全局单例：应用启动后只加载一次，页面间共享
 const data = reactive(loadData());
+/** 本次启动是否处于「本地无有效数据」状态（首次使用 / 清缓存 / 数据损坏）——供启动时云端恢复检测用 */
+export const isFirstRun = lastLoadWasFirstRun();
 
 /* ==================== 课程 CRUD ==================== */
 

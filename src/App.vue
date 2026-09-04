@@ -1,13 +1,43 @@
 <script>
-import { initData } from './store/index.js';
+import { isFirstRun, importData } from './store/useData.js';
+import { cloudFetch } from './utils/cloudBackup.js';
 
 export default {
 	onLaunch: function () {
-		// 首次启动时初始化本地数据（写入示例数据，便于演示；用户可随时清除）
-		initData();
+		// 本地无有效数据（首次使用/清缓存/数据损坏）时，尝试从云端备份找回。
+		// 延迟到首页渲染后再弹窗，避免启动瞬间 showModal 无页面上下文。
+		if (isFirstRun) {
+			setTimeout(() => tryCloudRecover(), 600);
+		}
 	},
 	onShow: function () {},
 	onHide: function () {},
+}
+
+/**
+ * 启动检测云端备份：本地数据为空且云端有备份 → 弹窗一键恢复。
+ * 非微信小程序端 / 未配置环境 / 云端无备份时静默跳过。
+ */
+async function tryCloudRecover() {
+	if (typeof wx === 'undefined' || !wx.cloud) return;
+	const r = await cloudFetch();
+	if (!r.ok) return; // 云端暂无备份或未配置环境，不打扰
+	uni.showModal({
+		title: '检测到云端备份',
+		content: '本地课表数据为空，是否从云端恢复上次备份？',
+		confirmText: '恢复',
+		cancelText: '暂不',
+		confirmColor: '#409eff',
+		success: (res) => {
+			if (!res.confirm) return;
+			const result = importData(r.payload);
+			uni.showToast({
+				title: result.ok ? '已从云端恢复课表' : result.error || '恢复失败',
+				icon: result.ok ? 'success' : 'none',
+				duration: 2500,
+			});
+		},
+	});
 }
 </script>
 

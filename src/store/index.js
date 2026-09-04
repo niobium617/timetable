@@ -18,6 +18,14 @@ const STORAGE_KEY = 'timetable_data';
 const BACKUP_KEY = 'timetable_backup';
 const DATA_VERSION = 1;
 
+/** 最近一次 loadData 是否走了「本地无有效数据」分支（首次使用/清缓存/数据损坏），供启动时云端恢复检测 */
+let lastLoadFirstRun = false;
+
+/** 读取上次 loadData 的首启标记（useData 模块加载后调用） */
+export function lastLoadWasFirstRun() {
+	return lastLoadFirstRun;
+}
+
 /* ==================== 基础读写 ==================== */
 
 /**
@@ -50,6 +58,7 @@ export function loadData() {
 	if (isFirstRun) {
 		saveData(raw, false);
 	}
+	lastLoadFirstRun = isFirstRun;
 	return raw;
 }
 
