@@ -7,6 +7,14 @@
 
 设计文档见 [`docs/方案1-优化版.md`](./docs/方案1-优化版.md)（含完整数据结构、过滤链规范与路线图）；需求原始描述见 [`docs/需求原始描述.md`](./docs/需求原始描述.md)。
 
+## 预览
+
+| 周课表 | 月日历 | 课表导入 | 设置 |
+|:---:|:---:|:---:|:---:|
+| <img src="./docs/images/schedule.png" width="190" alt="周课表"> | <img src="./docs/images/calendar.png" width="190" alt="月日历"> | <img src="./docs/images/import.png" width="190" alt="课表导入"> | <img src="./docs/images/settings.png" width="190" alt="设置"> |
+
+<sub>截图为 H5 预览，课程与学期均为内置**合成示例数据**（"示例大学"），不含任何真实课表。</sub>
+
 ## 功能
 
 | 模块 | 说明 |
