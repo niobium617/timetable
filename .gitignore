@@ -16,11 +16,14 @@ dist
 unpackage
 .hbuilderx
 
-# 环境变量与密钥（仓库后续公开，严禁提交）
+# 环境变量与密钥（仓库公开，严禁提交）
 .env
 .env.*
 *.pem
 *.key
+
+# 本地个人配置（真实 AppID / 云环境 ID 等，构建时写入产物，见 scripts/apply-appid.mjs）
+local.config.json
 
 # Editor directories and files
 .idea
