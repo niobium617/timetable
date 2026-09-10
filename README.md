@@ -51,7 +51,7 @@ src/
     sampleData.js              # 内置示例数据
   api/
     importApi.js               # 模式A 后端导入（可选，接口契约见方案文档）
-    config.js                  # 后端地址 / 云环境 ID 配置
+    config.js                  # 后端地址；云环境 ID 从 .env.local 的 VITE_CLOUD_ENV 读取
 docs/                          # 设计文档与需求原始描述
 scripts/
   apply-appid.mjs              # 构建后把本地 AppID 写入产物（见「本地配置」）
@@ -71,21 +71,29 @@ npm run build:mp-weixin
 # 打开微信开发者工具 → 导入 dist/build/mp-weixin
 ```
 
-### 本地配置（小程序 AppID）
+### 本地配置（小程序 AppID / 云环境 ID）
 
-仓库**不含任何真实 AppID**（避免 fork 者继承作者身份，也避免本地构建把 manifest 改脏）。要用自己的 AppID 跑云开发或预览，在仓库根目录新建 `local.config.json`（已 gitignore）：
+仓库**不含任何真实 AppID 和云环境 ID**——避免 fork 者继承作者身份，也避免本地构建把源文件改脏后误提交。
 
-```json
-{ "mpWeixinAppId": "你自己的小程序 AppID" }
-```
-
-`npm run build:mp-weixin` 构建完成后会自动把它写进 `dist/build/mp-weixin/project.config.json`——微信开发者工具认的正是这个文件，效果等价于直接写在 `src/manifest.json` 里。dev 模式起来之后可手动补写：
+要用自己的 AppID 和云开发，在仓库根目录新建 `.env.local`（已被 `.gitignore` 的 `.env.*` 规则忽略）：
 
 ```bash
-npm run appid
+# 微信云开发环境 ID（云备份/云恢复）——会被编译进小程序代码
+VITE_CLOUD_ENV=你的云开发环境ID
+# 自己的小程序 AppID —— 不带 VITE_ 前缀，不会进入 JS 产物
+MP_WEIXIN_APPID=你自己的小程序AppID
 ```
 
-不配置也能用：产物保持游客模式（`touristappid`），可在开发者工具中打开调试，云能力需真实 AppID。
+两个变量按需填写，都不填也能跑：
+
+- **`VITE_CLOUD_ENV`** 由 Vite 在编译时内联进 `src/api/config.js`（`import.meta.env.VITE_CLOUD_ENV`）。留空时点云备份会提示"未配置云环境"，其余功能不受影响。
+- **`MP_WEIXIN_APPID`** 故意不加 `VITE_` 前缀——Vite 只把 `VITE_` 开头的变量注入客户端代码，所以它只被构建脚本读取，**不会进入 JS 产物**。`npm run build:mp-weixin` 构建完成后会由 `scripts/apply-appid.mjs` 写进 `dist/build/mp-weixin/project.config.json`（微信开发者工具认的正是这个文件，效果等价于直接写在 `src/manifest.json` 里）。dev 模式起来之后可手动补写：
+
+  ```bash
+  npm run appid
+  ```
+
+不配置 `MP_WEIXIN_APPID` 时产物保持游客模式（`touristappid`），可在开发者工具中打开调试，云能力需真实 AppID。
 
 首次启动自动写入示例数据（2026-08-31 学期，含单双周/多段周/并排/国庆假期/调休示例），可在 设置 → 数据管理 中恢复或清除。
 
@@ -93,8 +101,8 @@ npm run appid
 
 - 所有数据默认通过 `uni.setStorageSync` 保存在设备本地（KB 级，远低于 1MB/10MB 上限），无账号体系
 - 可选云备份走微信云开发数据库，数据按 openid 隔离，**安全性依赖云数据库安全规则设为「仅创建者可读写」**
-- 本仓库不提交真实凭据：小程序 AppID 放在 gitignored 的 `local.config.json`
-- `src/api/config.js` 的 `apiBaseUrl` 为空（模式 A 后端地址）；`cloudEnv` 是云开发环境 ID——环境 ID 本身不是密钥，会随公开仓库暴露，其安全性完全取决于上面那条数据库安全规则。**切勿把云开发管理密钥写进仓库**
+- 本仓库不提交真实凭据：小程序 AppID 与云开发环境 ID 都放在 gitignored 的 `.env.local`（见上文「本地配置」）
+- `src/api/config.js` 的 `apiBaseUrl` 为空（模式 A 后端地址），`cloudEnv` 从 `VITE_CLOUD_ENV` 读取——两者留空时对应功能提示"未配置"，不影响本地课表。云环境 ID 本身不是密钥，但其安全性完全取决于上面那条数据库安全规则，因此同样不提交。**切勿把云开发管理密钥写进仓库**
 - 后端导入接口仅在内存中处理凭据、不落盘
 
 ## 路线图
