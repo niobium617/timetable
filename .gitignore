@@ -22,8 +22,7 @@ unpackage
 *.pem
 *.key
 
-# 本地个人配置（真实 AppID / 云环境 ID 等，构建时写入产物，见 scripts/apply-appid.mjs）
-local.config.json
+# 本地个人配置（真实 AppID / 云环境 ID）统一写在 .env.local，已被上面的 .env.* 规则忽略
 
 # Editor directories and files
 .idea

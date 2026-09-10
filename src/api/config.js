@@ -10,9 +10,10 @@ export const apiBaseUrl = '';
 
 /**
  * cloudEnv：微信云开发环境 ID（云备份/云恢复用）。
- * 在微信开发者工具「云开发」控制台创建环境后，把环境 ID 填入这里，
- * 例如 'timetable-1g2h3j4k5l6m7n8'；留空时点云备份会提示未配置。
- * 环境 ID 本身会随公开仓库暴露——依赖云数据库安全规则
- * 「仅创建者可读写」隔离数据，不要把管理密钥放进仓库。
+ * 在微信开发者工具「云开发」控制台创建环境后，把环境 ID 写进仓库根目录的
+ * .env.local（已 gitignore）：VITE_CLOUD_ENV=你的环境ID
+ * 留空时点云备份会提示未配置。
+ * 环境 ID 本身不是密钥，但公开仓库不提交它——安全性依赖云数据库安全规则
+ * 「仅创建者可读写」隔离数据，任何时候都不要把云开发管理密钥放进仓库。
  */
-export const cloudEnv = 'your-cloud-env-id';
+export const cloudEnv = import.meta.env.VITE_CLOUD_ENV || '';

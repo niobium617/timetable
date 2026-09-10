@@ -8,12 +8,15 @@
  * uni-app 编译时会把 manifest.json 的 mp-weixin.appid 写进产物的 project.config.json，
  * 微信开发者工具认的是后者——所以只要构建后覆盖那一个文件，效果等价。
  *
- * 本地配置：仓库根目录 local.config.json（已 gitignore）
- *   { "mpWeixinAppId": "wx1234567890abcdef" }
+ * 本地配置：仓库根目录 .env.local（已 gitignore，与 VITE_CLOUD_ENV 同一个文件）
+ *   MP_WEIXIN_APPID=wx1234567890abcdef
  * 未配置时静默跳过，产物保持游客模式（touristappid），微信开发者工具仍可打开调试。
  *
+ * 注意变量名不带 VITE_ 前缀：Vite 只把 VITE_ 开头的变量注入客户端代码，
+ * 不带前缀的只在本构建脚本里读取，AppID 不会进入 JS 产物。
+ *
  * 用法：
- *   npm run build:mp-weixin   # 构建后自动执行
+ *   npm run build:mp-weixin        # 构建后自动执行
  *   node scripts/apply-appid.mjs   # 手动补写（如 dev 模式跑起来之后）
  */
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs'
@@ -21,13 +24,24 @@ import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const LOCAL_CONFIG = join(root, 'local.config.json')
+const ENV_LOCAL = join(root, '.env.local')
 const MANIFEST = join(root, 'src', 'manifest.json')
 
-/** 读取本地配置里的 AppID，未配置或解析失败返回空串 */
-function readLocalAppId() {
-	const raw = JSON.parse(readFileSync(LOCAL_CONFIG, 'utf8'))
-	return String(raw.mpWeixinAppId || '').trim()
+/** 解析 .env.local 的 KEY=VALUE（只支持这种简单形式，够用且无依赖） */
+function readEnvLocal() {
+	const env = {}
+	for (const line of readFileSync(ENV_LOCAL, 'utf8').split(/\r?\n/)) {
+		const trimmed = line.trim()
+		if (!trimmed || trimmed.startsWith('#')) continue
+		const eq = trimmed.indexOf('=')
+		if (eq === -1) continue
+		let value = trimmed.slice(eq + 1).trim()
+		if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0]) {
+			value = value.slice(1, -1)
+		}
+		env[trimmed.slice(0, eq).trim()] = value
+	}
+	return env
 }
 
 /** 递归收集 dist 下所有 mp-weixin 产物的 project.config.json */
@@ -57,21 +71,21 @@ try {
 	// manifest.json 缺失或格式异常不归本脚本管，交给 uni 编译报错
 }
 
-if (!existsSync(LOCAL_CONFIG)) {
-	console.log('[appid] 未找到 local.config.json，跳过（产物为游客模式，可正常调试）')
+if (!existsSync(ENV_LOCAL)) {
+	console.log('[appid] 未找到 .env.local，跳过（产物为游客模式，可正常调试）')
 	process.exit(0)
 }
 
 let appid
 try {
-	appid = readLocalAppId()
+	appid = String(readEnvLocal().MP_WEIXIN_APPID || '').trim()
 } catch (e) {
-	console.warn(`[appid] local.config.json 解析失败，跳过：${e.message}`)
+	console.warn(`[appid] .env.local 读取失败，跳过：${e.message}`)
 	process.exit(0)
 }
 
 if (!appid) {
-	console.log('[appid] local.config.json 未配置 mpWeixinAppId，跳过')
+	console.log('[appid] .env.local 未配置 MP_WEIXIN_APPID，跳过')
 	process.exit(0)
 }
 
