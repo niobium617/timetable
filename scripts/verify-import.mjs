@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseTimetable, Parser } from '../src/utils/parser.js';
 import { matchIncremental, mergeCourses, findConflicts } from '../src/utils/importMatch.js';
 import { suggestAdjustWeekday } from '../src/utils/holiday.js';
-import { getCoursesOfDate } from '../src/utils/filter.js';
+import { getCoursesOfDate, countCoursesOfDate } from '../src/utils/filter.js';
 import { intersectWeeksRange, subtractWeeksRange, matchParityRange } from '../src/utils/weeksPattern.js';
 import { OFFICIAL_HOLIDAYS, OFFICIAL_ADJUSTMENTS, getOfficialYears } from '../src/utils/officialHolidays.js';
 import { getWeekday } from '../src/utils/time.js';
@@ -190,6 +190,35 @@ assert(r6.length === 0, '假期当天一次性课同样不显示');
 // 调休日：每周课按 targetWeekday 重映射，一次性课独立显示
 let r7 = getCoursesOfDate('2026-09-12', { ...baseData, adjustments: [{ date: '2026-09-12', targetWeekday: 1 }], courses: [weeklyMath, { id: 'o4', name: '周六活动', weekday: 3, startSection: 7, endSection: 8, weeks: 'all', date: '2026-09-12', sourceKey: null }] });
 assert(r7.some((c) => c.id === 'w1') && r7.some((c) => c.id === 'o4'), '调休日每周课重映射 + 一次性课独立显示');
+
+console.log('== 分级删除：取消型一次性课（cancelled）==');
+// 取消当天：抑制原每周课，自身不渲染
+const cancelRec = { id: 'x1', name: '高等数学', weekday: 1, startSection: 1, endSection: 2, weeks: 'all', date: '2026-09-07', overrideId: 'w1', cancelled: true, sourceKey: null };
+let c1 = getCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath, cancelRec] });
+assert(c1.length === 0, '取消型一次性课：当天原课被抑制且自身不显示');
+
+// 只影响当天：同周其它日期照常上课
+let c2 = getCoursesOfDate('2026-09-14', { ...baseData, courses: [weeklyMath, cancelRec] });
+assert(c2.length === 1 && c2[0].id === 'w1', '取消只作用于当天，下一周照常显示');
+
+// 月历圆点计数同样不含取消课
+assert(countCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath, cancelRec] }) === 0, '取消当天不计入课程数（月历圆点）');
+
+// 恢复（删除取消记录）= 原课回归
+let c3 = getCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath] });
+assert(c3.length === 1 && c3[0].id === 'w1' && !c3[0].conflict, '删除取消记录后原课回归且无冲突标记');
+
+// 取消记录不影响其他课程（同日另一门课照常显示）
+let c4 = getCoursesOfDate('2026-09-07', { ...baseData, courses: [weeklyMath, weeklyPE, cancelRec] });
+assert(c4.length === 1 && c4[0].id === 'w2', '取消只抑制被取消的那门课');
+
+// 调休日取消：按当天日期匹配，重映射显示的每周课同样被抑制
+let c5 = getCoursesOfDate('2026-09-12', {
+	...baseData,
+	adjustments: [{ date: '2026-09-12', targetWeekday: 1 }],
+	courses: [weeklyMath, { ...cancelRec, date: '2026-09-12' }],
+});
+assert(c5.length === 0, '调休日（补周一课）取消当天同样生效');
 
 console.log('== 周次集合运算（周段拆分）==');
 assert(intersectWeeksRange('all', 1, 4) === '1-4', 'all ∩ [1,4] = 1-4');

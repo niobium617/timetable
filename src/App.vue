@@ -44,6 +44,23 @@ async function tryCloudRecover() {
 <style lang="scss">
 @import "uview-plus/index.scss";
 
+/*
+ * H5 端提起 uni 内置弹窗层级。
+ *
+ * uni 的 showModal/showToast 层级只有 999，而 uview-plus 的弹层是 10070 起
+ * （mask 10070 / popup 10075）。因此在 u-popup 内部调用 showModal 时，
+ * 确认框会被弹层遮罩整个盖住 —— 看得见一半、点不到按钮，点下去只会关掉弹层。
+ * 这里把 uni-modal 整个容器抬到 uview 弹层之上（toast 由 uview 自己抬到 10090）。
+ * 小程序端弹窗是原生组件，始终在最上层，不受影响，故用 #ifdef H5 隔离。
+ *
+ * !important：uni 基础样式与本文件的加载顺序由打包器决定，不保证谁在后。
+ */
+/* #ifdef H5 */
+uni-modal {
+	z-index: 10081 !important;
+}
+/* #endif */
+
 /* 每个页面公共css */
 page {
 	background-color: #f6f7f9;

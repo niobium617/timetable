@@ -55,6 +55,9 @@
 			@close="editShow = false"
 			@save="onCourseSave"
 			@remove="onCourseRemove"
+			@remove-once="onCourseRemoveOnce"
+			@remove-sections="onCourseRemoveSections"
+			@remove-range="onCourseRemoveRange"
 			@copy="onCourseCopy"
 		/>
 	</view>
@@ -83,6 +86,9 @@ const {
 	deleteCourse,
 	copyCourse,
 	splitCourseRange,
+	cancelCourseOnDate,
+	deleteCourseRange,
+	deleteCourseSections,
 } = useData();
 
 /** 课程覆盖的最大周号（周段拆分选择器上限，默认 20） */
@@ -197,6 +203,56 @@ function onCourseCopy(id) {
 	const copy = copyCourse(id);
 	uni.showToast({ title: '已复制，可修改后保存', icon: 'none' });
 	openEdit(copy);
+}
+
+/* ==================== 分级删除 ==================== */
+
+/** 仅取消当天这一节（其他日期照常上课）；留在当日弹窗便于就地恢复 */
+function onCourseRemoveOnce({ id, date }) {
+	const r = cancelCourseOnDate(id, date);
+	if (!r.ok) {
+		uni.showToast({ title: r.error || '取消失败', icon: 'none', duration: 2500 });
+		return;
+	}
+	uni.showToast({
+		title: r.existed ? '当天已经是取消状态' : '已取消当天课程',
+		icon: 'none',
+		duration: 2000,
+	});
+	editShow.value = false;
+	sheetShow.value = true;
+}
+
+/** 删除部分节次（中间截断时自动拆分为两门课） */
+function onCourseRemoveSections({ id, start, end }) {
+	const r = deleteCourseSections(id, start, end);
+	if (!r.ok) {
+		uni.showToast({ title: r.error || '删除失败', icon: 'none', duration: 2500 });
+		return;
+	}
+	uni.showToast({
+		title: r.deleted ? '已删除整门课程' : r.split ? '已删除所选节次（拆分为两门课）' : '已删除所选节次',
+		icon: 'success',
+		duration: 2500,
+	});
+	editShow.value = false;
+	sheetShow.value = true;
+}
+
+/** 删除部分周次（删完则整门删除） */
+function onCourseRemoveRange({ id, start, end }) {
+	const r = deleteCourseRange(id, start, end);
+	if (!r.ok) {
+		uni.showToast({ title: r.error || '删除失败', icon: 'none', duration: 2500 });
+		return;
+	}
+	uni.showToast({
+		title: r.deleted ? '已删除整门课程' : `已删除第 ${start}-${end} 周的课程`,
+		icon: 'success',
+		duration: 2500,
+	});
+	editShow.value = false;
+	sheetShow.value = true;
 }
 </script>
 

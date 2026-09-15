@@ -45,6 +45,7 @@ export function getDateStatus(dateStr, { holidays = [], adjustments = [], config
  * @param {string} dateStr 'YYYY-MM-DD'
  * @param {object} data { courses, holidays, adjustments, config }
  * @returns {Array} 按 startSection 升序的课程数组；一次性课参与的节次重叠项带 conflict:true 副本
+ *   注意：取消型一次性课（course.cancelled）不返回，仅用于抑制原每周课在该日期的显示
  */
 export function getCoursesOfDate(dateStr, data = {}) {
 	const { courses = [], holidays = [], adjustments = [], config = {} } = data;
@@ -60,9 +61,13 @@ export function getCoursesOfDate(dateStr, data = {}) {
 	const weekly = courses.filter((c) => !c.date && c.weekday === effectiveWeekday && isCourseOnWeek(c, weekNum));
 	const oneoffs = courses.filter((c) => c.date === dateStr);
 
-	// 「仅本次修改」的一次性课（overrideId）在该日期替换原每周课的显示
+	// 「仅本次修改」的一次性课（overrideId）在该日期替换原每周课的显示；
+	// 「取消型」一次性课（cancelled）只起抑制作用，自身不渲染（daySheet 单独列出可恢复）
 	const overridden = new Set(oneoffs.map((o) => o.overrideId).filter((id) => id != null));
-	const list = [...weekly.filter((c) => !overridden.has(c.id)), ...oneoffs];
+	const list = [
+		...weekly.filter((c) => !overridden.has(c.id)),
+		...oneoffs.filter((o) => !o.cancelled),
+	];
 
 	// 同日同节次多课按 startSection 排序（并排渲染由 weekGrid 的布局算法处理）
 	list.sort((a, b) => a.startSection - b.startSection || a.endSection - b.endSection);

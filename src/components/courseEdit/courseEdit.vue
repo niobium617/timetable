@@ -2,13 +2,93 @@
 	<u-popup :show="show" mode="bottom" :round="24" safe-area-inset-bottom @close="$emit('close')">
 		<view class="course-edit">
 			<view class="edit-header">
-				<text class="edit-title">{{ isEdit ? '编辑课程' : '新增课程' }}</text>
+				<text class="edit-title">{{ headerTitle }}</text>
 				<view class="edit-close" @click="$emit('close')">
 					<u-icon name="close" size="20" color="#909399"></u-icon>
 				</view>
 			</view>
 
-			<scroll-view scroll-y class="edit-body">
+			<!-- 删除方式选择：整门 / 仅取消当天 / 部分节次 / 部分周次 -->
+			<scroll-view v-if="delMode === 'menu'" scroll-y class="edit-body">
+				<view class="del-menu">
+					<view
+						v-if="canCancelOnce"
+						class="del-row"
+						@click="onCancelOnce"
+					>
+						<view class="del-row-main">
+							<text class="del-row-title">仅取消当天这一节</text>
+							<text class="del-row-desc">{{ onceDesc }}</text>
+						</view>
+						<u-icon name="arrow-right" size="14" color="#c0c4cc"></u-icon>
+					</view>
+					<view
+						v-if="isWeeklyCourse"
+						class="del-row"
+						@click="openDelSections"
+					>
+						<view class="del-row-main">
+							<text class="del-row-title">删除部分节次</text>
+							<text class="del-row-desc">只删掉这门课占用的部分节次，其余节次保留</text>
+						</view>
+						<u-icon name="arrow-right" size="14" color="#c0c4cc"></u-icon>
+					</view>
+					<view
+						v-if="isWeeklyCourse"
+						class="del-row"
+						@click="openDelWeeks"
+					>
+						<view class="del-row-main">
+							<text class="del-row-title">删除部分周次</text>
+							<text class="del-row-desc">只删掉所选周段的课，其余周照常上课</text>
+						</view>
+						<u-icon name="arrow-right" size="14" color="#c0c4cc"></u-icon>
+					</view>
+					<view class="del-row" @click="onDeleteWhole">
+						<view class="del-row-main">
+							<text class="del-row-title del-row-danger">删除整门课程</text>
+							<text class="del-row-desc">删除全部周次，课程信息不再保留</text>
+						</view>
+						<u-icon name="arrow-right" size="14" color="#c0c4cc"></u-icon>
+					</view>
+				</view>
+			</scroll-view>
+
+			<!-- 删除节次段面板 -->
+			<scroll-view v-else-if="delMode === 'section'" scroll-y class="edit-body">
+				<view class="del-panel">
+					<text class="del-tip">该课程为 第 {{ props.course.startSection }}-{{ props.course.endSection }} 节，选择要删除的节次：</text>
+					<view class="range-pickers">
+						<picker mode="selector" :range="sectionOptions" :value="delSectionStart - 1" @change="onDelSectionStartChange">
+							<view class="date-box">第 {{ delSectionStart }} 节</view>
+						</picker>
+						<text class="range-sep">至</text>
+						<picker mode="selector" :range="sectionOptions" :value="delSectionEnd - 1" @change="onDelSectionEndChange">
+							<view class="date-box">第 {{ delSectionEnd }} 节</view>
+						</picker>
+					</view>
+					<text class="scope-tip" :class="{ 'tip-warn': sectionDelInvalid }">{{ delSectionTip }}</text>
+				</view>
+			</scroll-view>
+
+			<!-- 删除周段面板 -->
+			<scroll-view v-else-if="delMode === 'week'" scroll-y class="edit-body">
+				<view class="del-panel">
+					<text class="del-tip">该课程上课周次：{{ courseWeeksLabel }}，选择要删除的周段：</text>
+					<view class="range-pickers">
+						<picker mode="selector" :range="weekOptions" :value="delWeekStart - 1" @change="onDelWeekStartChange">
+							<view class="date-box">第 {{ delWeekStart }} 周</view>
+						</picker>
+						<text class="range-sep">至</text>
+						<picker mode="selector" :range="weekOptions" :value="delWeekEnd - 1" @change="onDelWeekEndChange">
+							<view class="date-box">第 {{ delWeekEnd }} 周</view>
+						</picker>
+					</view>
+					<text class="scope-tip" :class="{ 'tip-warn': weekDelInvalid }">{{ delWeekTip }}</text>
+				</view>
+			</scroll-view>
+
+			<scroll-view v-else scroll-y class="edit-body">
 				<!-- 课程完整信息（只读展示，长文本完整换行，可随弹窗滚动查看） -->
 				<view v-if="isEdit" class="course-brief">
 					<view v-if="form.name" class="brief-row">
@@ -163,9 +243,19 @@
 
 			<!-- 底部操作 -->
 			<view class="edit-footer">
-				<view v-if="isEdit" class="btn btn-danger" @click="onDelete">删除</view>
-				<view v-if="isEdit" class="btn btn-plain" @click="$emit('copy', form.id)">复制</view>
-				<view class="btn btn-primary" @click="onSave">保存</view>
+				<!-- 删除面板：返回 + 确认删除 -->
+				<template v-if="delMode === 'section' || delMode === 'week'">
+					<view class="btn btn-plain" @click="delMode = 'menu'">返回</view>
+					<view class="btn btn-danger" :class="{ disabled: delConfirmDisabled }" @click="onConfirmRangeDelete">
+						确认删除
+					</view>
+				</template>
+				<view v-else-if="delMode === 'menu'" class="btn btn-plain" @click="delMode = ''">返回</view>
+				<template v-else>
+					<view v-if="isEdit" class="btn btn-danger" @click="onDelete">删除</view>
+					<view v-if="isEdit" class="btn btn-plain" @click="$emit('copy', form.id)">复制</view>
+					<view class="btn btn-primary" @click="onSave">保存</view>
+				</template>
 			</view>
 		</view>
 	</u-popup>
@@ -180,8 +270,8 @@
  * - course 非空 → 编辑模式（底部出现 删除/复制）
  */
 import { ref, reactive, watch, computed } from 'vue';
-import { WEEKDAY_NAMES, todayStr } from '../../utils/time.js';
-import { describeWeeks, parseWeeksPattern, intersectWeeksRange, matchParityRange } from '../../utils/weeksPattern.js';
+import { WEEKDAY_NAMES, todayStr, formatMD, getWeekday } from '../../utils/time.js';
+import { describeWeeks, parseWeeksPattern, intersectWeeksRange, subtractWeeksRange, matchParityRange } from '../../utils/weeksPattern.js';
 
 const props = defineProps({
 	show: { type: Boolean, default: false },
@@ -195,7 +285,7 @@ const props = defineProps({
 	/** 周段选择的最大周号（「周段」模式起止周范围） */
 	maxWeek: { type: Number, default: 20 },
 });
-const emit = defineEmits(['close', 'save', 'remove', 'copy']);
+const emit = defineEmits(['close', 'save', 'remove', 'remove-once', 'remove-sections', 'remove-range', 'copy']);
 
 const COURSE_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#8e44ad', '#16a085', '#e84393', '#3498db', '#9c6b3c', '#909399'];
 const WEEK_TYPES = [
@@ -205,7 +295,24 @@ const WEEK_TYPES = [
 	{ value: 'custom', label: '自定义' },
 ];
 
+/**
+ * 删除模式：'' 正常编辑 / 'menu' 选择删除方式 / 'section' 节次段 / 'week' 周段
+ * 删除面板取代表单区域，底部按钮切换为「返回 / 确认删除」
+ */
+const delMode = ref('');
+/** 节次段删除的起止节次（进入面板时默认取课程第一节，避免误触即整门删除） */
+const delSectionStart = ref(1);
+const delSectionEnd = ref(1);
+/** 周段删除的起止周（进入面板时默认取课程实际有课的第一周） */
+const delWeekStart = ref(1);
+const delWeekEnd = ref(1);
+
 const isEdit = computed(() => !!props.course);
+/** 每周课（可做节次段/周段删除与单天取消；一次性课只能整门删） */
+const isWeeklyCourse = computed(() => isEdit.value && !props.course.date);
+const headerTitle = computed(() =>
+	delMode.value ? '删除课程' : isEdit.value ? '编辑课程' : '新增课程'
+);
 const sectionOptions = computed(() =>
 	Array.from({ length: props.sectionsCount }, (_, i) => `第 ${i + 1} 节`)
 );
@@ -255,6 +362,8 @@ function initForm() {
 	const c = props.course;
 	const pre = props.prefill;
 	const todayWeekday = new Date().getDay() || 7;
+
+	delMode.value = ''; // 每次打开回到正常编辑态
 
 	form.id = c ? c.id : null;
 	form.name = c ? c.name : '';
@@ -446,7 +555,18 @@ function onSave() {
 	});
 }
 
+/* ==================== 分级删除 ==================== */
+
+/** 底部「删除」：每周课先进删除方式菜单，一次性课只能整门删除 */
 function onDelete() {
+	if (isWeeklyCourse.value) {
+		delMode.value = 'menu';
+		return;
+	}
+	onDeleteWhole();
+}
+
+function onDeleteWhole() {
 	uni.showModal({
 		title: '删除课程',
 		content: `确定删除「${props.course.name}」吗？`,
@@ -455,6 +575,145 @@ function onDelete() {
 			if (res.confirm) emit('remove', form.id);
 		},
 	});
+}
+
+/** 「仅取消当天这一节」：需要知道点的是哪一天（周课表点击卡片/日历当日弹窗都会传） */
+const canCancelOnce = computed(() => isWeeklyCourse.value && !!props.dateContext);
+
+const onceDesc = computed(() => {
+	if (!props.dateContext) return '请先点击某一天的课程卡再取消';
+	return `${formatMD(props.dateContext)} ${WEEKDAY_NAMES[getWeekday(props.dateContext) - 1]} · 其他日期照常上课`;
+});
+
+function onCancelOnce() {
+	const date = props.dateContext;
+	if (!date) {
+		uni.showToast({ title: '请先选择要取消的日期', icon: 'none' });
+		return;
+	}
+	uni.showModal({
+		title: '取消当天课程',
+		content: `${formatMD(date)} ${WEEKDAY_NAMES[getWeekday(date) - 1]} 的「${props.course.name}」当天不再显示，其他日期照常上课；可在日历页恢复。`,
+		confirmColor: '#f56c6c',
+		success: (res) => {
+			if (res.confirm) emit('remove-once', { id: form.id, date });
+		},
+	});
+}
+
+/* ---------- 删除部分节次 ---------- */
+
+function openDelSections() {
+	delSectionStart.value = props.course.startSection;
+	delSectionEnd.value = props.course.startSection;
+	delMode.value = 'section';
+}
+
+function onDelSectionStartChange(e) {
+	const v = Number(e.detail.value) + 1;
+	delSectionStart.value = v;
+	if (delSectionEnd.value < v) delSectionEnd.value = v;
+}
+
+function onDelSectionEndChange(e) {
+	const v = Number(e.detail.value) + 1;
+	delSectionEnd.value = Math.max(v, delSectionStart.value);
+}
+
+const fmtSectionRange = (a, b) => (a === b ? `第 ${a} 节` : `第 ${a}-${b} 节`);
+
+/** 节次段是否超出课程自身节次范围（越界禁止提交） */
+const sectionDelInvalid = computed(
+	() => delSectionStart.value < props.course.startSection || delSectionEnd.value > props.course.endSection
+);
+
+const delSectionTip = computed(() => {
+	const cs = props.course.startSection;
+	const ce = props.course.endSection;
+	const lo = delSectionStart.value;
+	const hi = delSectionEnd.value;
+	if (lo < cs || hi > ce) return `请选择 第 ${cs}-${ce} 节 范围内的节次`;
+	const kept = [];
+	if (lo - 1 >= cs) kept.push(fmtSectionRange(cs, lo - 1));
+	if (hi + 1 <= ce) kept.push(fmtSectionRange(hi + 1, ce));
+	if (kept.length === 0) return '该课程将被完全删除';
+	return `删除后保留 ${kept.join(' 与 ')}${kept.length > 1 ? '（拆分为两门课）' : ''}`;
+});
+
+/* ---------- 删除部分周次 ---------- */
+
+/** 课程实际有课的第一周（all/odd/even 按第 1 周） */
+function firstCourseWeek() {
+	const { type, weeks } = parseWeeksPattern(props.course.weeks || 'all');
+	if (type === 'range' && weeks.size) return Math.min(...weeks);
+	return 1;
+}
+
+function openDelWeeks() {
+	const w = firstCourseWeek();
+	delWeekStart.value = w;
+	delWeekEnd.value = w;
+	delMode.value = 'week';
+}
+
+function onDelWeekStartChange(e) {
+	const v = Number(e.detail.value) + 1;
+	delWeekStart.value = v;
+	if (delWeekEnd.value < v) delWeekEnd.value = v;
+}
+
+function onDelWeekEndChange(e) {
+	const v = Number(e.detail.value) + 1;
+	delWeekEnd.value = Math.max(v, delWeekStart.value);
+}
+
+const courseWeeksLabel = computed(() => describeWeeks(props.course.weeks || 'all'));
+
+/** 所选周段内该课程的上课周数 */
+const delWeekRemain = computed(() =>
+	intersectWeeksRange(props.course.weeks || 'all', delWeekStart.value, delWeekEnd.value)
+);
+
+const weekDelInvalid = computed(() => !delWeekRemain.value);
+
+const delWeekTip = computed(() => {
+	if (!delWeekRemain.value) {
+		return `第 ${delWeekStart.value}-${delWeekEnd.value} 周内没有这门课，请调整范围`;
+	}
+	const count = parseWeeksPattern(delWeekRemain.value).weeks.size;
+	const remainder = subtractWeeksRange(
+		props.course.weeks || 'all',
+		delWeekStart.value,
+		delWeekEnd.value
+	);
+	if (!remainder) return `将删除全部 ${count} 周课程（整门课程被删除）`;
+	return `将删除其中 ${count} 周课程，保留：${describeWeeks(remainder)}`;
+});
+
+/* ---------- 提交 ---------- */
+
+const delConfirmDisabled = computed(() =>
+	delMode.value === 'section' ? sectionDelInvalid.value : weekDelInvalid.value
+);
+
+function onConfirmRangeDelete() {
+	if (delMode.value === 'section') {
+		if (sectionDelInvalid.value) {
+			uni.showToast({ title: delSectionTip.value, icon: 'none' });
+			return;
+		}
+		emit('remove-sections', {
+			id: form.id,
+			start: delSectionStart.value,
+			end: delSectionEnd.value,
+		});
+		return;
+	}
+	if (weekDelInvalid.value) {
+		uni.showToast({ title: delWeekTip.value, icon: 'none' });
+		return;
+	}
+	emit('remove-range', { id: form.id, start: delWeekStart.value, end: delWeekEnd.value });
 }
 </script>
 
@@ -494,6 +753,92 @@ function onDelete() {
 	padding: 0 32rpx;
 	max-height: 56vh;
 	box-sizing: border-box;
+}
+
+/* ---------- 分级删除：方式菜单 ---------- */
+.del-menu {
+	padding: 8rpx 0 16rpx;
+
+	.del-row {
+		display: flex;
+		align-items: center;
+		gap: 16rpx;
+		padding: 26rpx 4rpx;
+		border-bottom: 1rpx solid #f5f7fa;
+
+		&:active {
+			background: #f5f9ff;
+		}
+
+		.del-row-main {
+			flex: 1;
+			min-width: 0;
+		}
+
+		.del-row-title {
+			display: block;
+			font-size: 30rpx;
+			font-weight: 600;
+			color: #303133;
+		}
+
+		.del-row-danger {
+			color: #f56c6c;
+		}
+
+		.del-row-desc {
+			display: block;
+			margin-top: 8rpx;
+			font-size: 22rpx;
+			color: #909399;
+			line-height: 1.4;
+		}
+	}
+}
+
+/* ---------- 分级删除：节次段 / 周段面板 ---------- */
+.del-panel {
+	padding: 24rpx 0;
+
+	.del-tip {
+		display: block;
+		font-size: 26rpx;
+		color: #606266;
+		line-height: 1.5;
+		margin-bottom: 24rpx;
+	}
+
+	.range-pickers {
+		display: flex;
+		align-items: center;
+		gap: 12rpx;
+
+		.date-box {
+			display: inline-block;
+			background: #f5f7fa;
+			border-radius: 10rpx;
+			padding: 10rpx 24rpx;
+			font-size: 26rpx;
+			color: #303133;
+		}
+
+		.range-sep {
+			font-size: 24rpx;
+			color: #909399;
+		}
+	}
+
+	.scope-tip {
+		display: block;
+		margin-top: 20rpx;
+		font-size: 24rpx;
+		color: #67c23a;
+		line-height: 1.5;
+	}
+
+	.tip-warn {
+		color: #e6a23c;
+	}
 }
 
 /* 课程完整信息只读展示（长文本完整换行） */
@@ -738,6 +1083,10 @@ function onDelete() {
 	.btn-danger {
 		background: #fef0f0;
 		color: #f56c6c;
+	}
+
+	.btn.disabled {
+		opacity: 0.45;
 	}
 }
 </style>

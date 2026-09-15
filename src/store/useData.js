@@ -18,7 +18,8 @@ import {
 	lastLoadWasFirstRun,
 } from './index.js';
 import { mergeCourses } from '../utils/importMatch.js';
-import { isValidWeeksPattern } from '../utils/week.js';
+import { isValidWeeksPattern, getWeekInfo } from '../utils/week.js';
+import { getWeekday } from '../utils/time.js';
 import { OFFICIAL_HOLIDAYS, getOfficialYears } from '../utils/officialHolidays.js';
 import { intersectWeeksRange, subtractWeeksRange } from '../utils/weeksPattern.js';
 
@@ -54,11 +55,21 @@ export function updateCourse(id, patch) {
 	return true;
 }
 
-/** 删除课程 */
+/**
+ * 删除课程：连同指向它的「取消单天」记录一起清理。
+ *
+ * 取消记录（cancelled）只用于抑制原课当天显示，本身不是内容——原课没了它们就是
+ * 悬空行：会挂在日历当日弹窗的「已取消」列表里，点「恢复」也恢复不出任何东西。
+ * 「仅本次修改」的替代课（非 cancelled）是真实内容，保留为独立的一次性课。
+ */
 export function deleteCourse(id) {
 	const idx = data.courses.findIndex(c => c.id === id);
 	if (idx === -1) return false;
 	data.courses.splice(idx, 1);
+	for (let i = data.courses.length - 1; i >= 0; i--) {
+		const c = data.courses[i];
+		if (c.cancelled && c.overrideId === id) data.courses.splice(i, 1);
+	}
 	save();
 	return true;
 }
@@ -192,6 +203,164 @@ export function splitCourseRange(originalId, patch, start, end) {
 	return { ok: true, remainder: false };
 }
 
+/* ==================== 分级删除 ==================== */
+
+/**
+ * 仅取消某一天这一节课（如老师临时停课、放假补课取消），其他日期不受影响。
+ *
+ * 实现：新增一条「取消型一次性课」（cancelled:true + overrideId 指向原课），
+ * 复用既有「仅本次修改」的抑制机制——filter.js 会用 overrideId 抑制原课当天显示，
+ * 而 cancelled 记录自身不参与渲染，只在当日弹窗列出供恢复。
+ * 若当天已存在替代型一次性课（overrideId 命中且非 cancelled），直接把它标记为取消：
+ * 用户意图是「这节课没有了」，原先的替代内容同时作废。
+ *
+ * @param {string} id 每周课 id
+ * @param {string} dateStr 'YYYY-MM-DD'
+ * @returns {{ ok: boolean, existed?: boolean, replaced?: boolean, error?: string }}
+ */
+export function cancelCourseOnDate(id, dateStr) {
+	const src = data.courses.find((c) => c.id === id);
+	if (!src || src.date) return { ok: false, error: '仅每周课程支持取消单天' };
+	if (!dateStr) return { ok: false, error: '缺少取消日期' };
+
+	const sameDay = data.courses.filter((c) => c.date === dateStr && c.overrideId === id);
+	if (sameDay.some((c) => c.cancelled)) return { ok: true, existed: true };
+
+	const replaced = sameDay.find((c) => !c.cancelled);
+	if (replaced) {
+		updateCourse(replaced.id, { cancelled: true });
+		return { ok: true, replaced: true };
+	}
+
+	addCourse({
+		name: src.name,
+		teacher: src.teacher,
+		classroom: src.classroom,
+		color: src.color,
+		remark: src.remark,
+		weekday: getWeekday(dateStr), // 当天实际星期（调休日按当天记）
+		startSection: src.startSection,
+		endSection: src.endSection,
+		weeks: 'all',
+		date: dateStr,
+		overrideId: id,
+		cancelled: true,
+	});
+	return { ok: true };
+}
+
+/**
+ * 恢复某天被取消的课：删除对应的取消型一次性课，原每周课自动回归显示
+ * @returns {{ ok: boolean, error?: string }}
+ */
+export function restoreCourseOnDate(overrideId, dateStr) {
+	const idx = data.courses.findIndex(
+		(c) => c.cancelled && c.date === dateStr && c.overrideId === overrideId
+	);
+	if (idx === -1) return { ok: false, error: '没有找到取消记录' };
+	data.courses.splice(idx, 1);
+	save();
+	return { ok: true };
+}
+
+/**
+ * 周段删除：删除某每周课在第 [start,end] 周的课程，其余周保留
+ * - 剩余周非空：原课周次收窄为剩余周
+ * - 剩余周为空：整门删除
+ * 同时清理落在该周段内的「取消单天」记录（避免留下悬空的取消行）。
+ * 删除前自动备份（设置页「撤销导入」可恢复）。
+ * @returns {{ ok: boolean, remainder: boolean, deleted: boolean, error?: string }}
+ */
+export function deleteCourseRange(id, start, end) {
+	const src = data.courses.find((c) => c.id === id);
+	if (!src) return { ok: false, remainder: false, deleted: false, error: '课程不存在' };
+	if (src.date) return { ok: false, remainder: false, deleted: false, error: '一次性课程请直接删除整门' };
+
+	const rangeWeeks = intersectWeeksRange(src.weeks || 'all', start, end);
+	if (!rangeWeeks) {
+		return { ok: false, remainder: false, deleted: false, error: `该课程在第 ${start}-${end} 周没有课` };
+	}
+	const remainderWeeks = subtractWeeksRange(src.weeks || 'all', start, end);
+
+	if (!backupCurrent(data)) {
+		return { ok: false, remainder: false, deleted: false, error: '自动备份失败，已中止删除' };
+	}
+
+	// 取消记录：整门删除时全部清理，仅收窄周次时只清理落在删除周段内的
+	const lo = Math.min(start, end);
+	const hi = Math.max(start, end);
+	const dropIds = data.courses
+		.filter((c) => {
+			if (!c.cancelled || c.overrideId !== id || !c.date) return false;
+			if (!remainderWeeks) return true;
+			const w = getWeekInfo(c.date, data.config).weekNum;
+			return w >= lo && w <= hi;
+		})
+		.map((c) => c.id);
+	dropIds.forEach((cid) => {
+		const i = data.courses.findIndex((c) => c.id === cid);
+		if (i !== -1) data.courses.splice(i, 1);
+	});
+
+	if (remainderWeeks) {
+		updateCourse(id, { weeks: remainderWeeks });
+		return { ok: true, remainder: true, deleted: false };
+	}
+	deleteCourse(id);
+	return { ok: true, remainder: false, deleted: true };
+}
+
+/**
+ * 节次段删除：删除某每周课的第 [dStart,dEnd] 节，其余节次保留
+ * 中间截断（两侧都有保留段）时自动拆成两门课：原课保留左侧节次，右侧复制为新课程；
+ * 右侧复制时，原课的「取消单天」记录同步复制一份指向新课程（当天整门取消对两段都成立）。
+ * 删除前自动备份（设置页「撤销导入」可恢复）。
+ * @returns {{ ok: boolean, split: boolean, deleted: boolean, newId?: string, error?: string }}
+ */
+export function deleteCourseSections(id, dStart, dEnd) {
+	const src = data.courses.find((c) => c.id === id);
+	if (!src) return { ok: false, split: false, deleted: false, error: '课程不存在' };
+	if (src.date) return { ok: false, split: false, deleted: false, error: '一次性课程请直接删除整门' };
+
+	const lo = Math.min(dStart, dEnd);
+	const hi = Math.max(dStart, dEnd);
+	const cs = Number(src.startSection);
+	const ce = Number(src.endSection);
+	if (lo < cs || hi > ce) {
+		return { ok: false, split: false, deleted: false, error: `请选择第 ${cs}-${ce} 节范围内的节次` };
+	}
+	if (!backupCurrent(data)) {
+		return { ok: false, split: false, deleted: false, error: '自动备份失败，已中止删除' };
+	}
+
+	const leftEnd = lo - 1;
+	const rightStart = hi + 1;
+	const hasLeft = leftEnd >= cs;
+	const hasRight = rightStart <= ce;
+
+	if (hasLeft && hasRight) {
+		const refs = data.courses.filter((c) => c.cancelled && c.overrideId === id);
+		updateCourse(id, { endSection: leftEnd });
+		const { id: _omit, ...rest } = src;
+		const created = addCourse({ ...rest, startSection: rightStart, endSection: ce });
+		refs.forEach((ref) => {
+			const { id: _refId, ...refRest } = ref;
+			addCourse({ ...refRest, overrideId: created.id });
+		});
+		return { ok: true, split: true, deleted: false, newId: created.id };
+	}
+	if (hasLeft) {
+		updateCourse(id, { endSection: leftEnd });
+		return { ok: true, split: false, deleted: false };
+	}
+	if (hasRight) {
+		updateCourse(id, { startSection: rightStart });
+		return { ok: true, split: false, deleted: false };
+	}
+	deleteCourse(id);
+	return { ok: true, split: false, deleted: true };
+}
+
 /* ==================== 假期 / 调休 ==================== */
 
 /** 添加假期（支持批量日期数组） */
@@ -299,6 +468,10 @@ export function useData() {
 		deleteCourse,
 		copyCourse,
 		splitCourseRange,
+		cancelCourseOnDate,
+		restoreCourseOnDate,
+		deleteCourseRange,
+		deleteCourseSections,
 		importCourses,
 		addHolidays,
 		deleteHoliday,

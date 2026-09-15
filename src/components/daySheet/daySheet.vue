@@ -54,7 +54,26 @@
 						</view>
 					</view>
 
-					<view v-if="courseList.length === 0" class="sheet-empty">
+					<!-- 已取消的课：灰色行 + 一键恢复（取消记录不参与渲染，仅在此列出） -->
+					<view
+						v-for="item in cancelledList"
+						:key="'x' + item.course.id"
+						class="sheet-course course-cancelled"
+					>
+						<view class="course-bar" :style="{ backgroundColor: item.course.color }"></view>
+						<view class="course-main">
+							<view class="course-name-line">
+								<text class="course-name">{{ item.course.name }}</text>
+								<text class="tag tag-cancel">已取消</text>
+							</view>
+							<view class="course-sub">
+								<text class="sub-item">{{ item.timeRange }}</text>
+							</view>
+						</view>
+						<view class="restore-btn" @click.stop="onRestore(item.course)">恢复</view>
+					</view>
+
+					<view v-if="courseList.length === 0 && cancelledList.length === 0" class="sheet-empty">
 						<text class="empty-icon">🍃</text>
 						<text>这一天没有课程</text>
 					</view>
@@ -86,7 +105,7 @@ const props = defineProps({
 });
 defineEmits(['close', 'courseClick', 'add']);
 
-const { data } = useData();
+const { data, restoreCourseOnDate } = useData();
 
 /** 当天状态；展示用周号下限为 1（学期开始前不出现"第 0 周/负数周"），单双周随之计算 */
 const status = computed(() => {
@@ -110,8 +129,14 @@ const holidayName = computed(() => (status.value.holiday ? status.value.holiday.
 const adjustRemark = computed(() => (status.value.adjustment ? status.value.adjustment.remark || '' : ''));
 
 /** 课程列表 + 起止时间文本（取节次表首尾时间） */
-const courseList = computed(() => {
-	const courses = getCoursesOfDate(props.date, data);
+const courseList = computed(() => buildList(getCoursesOfDate(props.date, data)));
+
+/** 当天被取消的课（取消型一次性课，filter 链不返回，此处单独列出以便恢复） */
+const cancelledList = computed(() =>
+	buildList(data.courses.filter((c) => c.cancelled && c.date === props.date))
+);
+
+function buildList(courses) {
 	const sections = data.config.sections || [];
 	const findTime = (n) => {
 		const s = sections.find((x) => Number(x.section) === n);
@@ -124,7 +149,13 @@ const courseList = computed(() => {
 			? findTime(c.startSection)
 			: `${findTime(c.startSection).split(' - ')[0]} - ${findTime(c.endSection).split(' - ')[1] || ''}`,
 	}));
-});
+}
+
+/** 恢复当天被取消的课（删除取消记录，原每周课回归显示） */
+function onRestore(course) {
+	const r = restoreCourseOnDate(course.overrideId, course.date);
+	uni.showToast({ title: r.ok ? '已恢复该节课' : r.error || '恢复失败', icon: r.ok ? 'success' : 'none' });
+}
 </script>
 
 <style lang="scss" scoped>
@@ -219,6 +250,33 @@ const courseList = computed(() => {
 		background: #fef0f0;
 	}
 
+	/* 已取消的课：整行弱化，仅保留恢复按钮为强调色 */
+	&.course-cancelled {
+		opacity: 0.7;
+
+		.course-bar {
+			background: #c0c4cc !important;
+		}
+
+		.course-name {
+			color: #909399;
+			text-decoration: line-through;
+		}
+	}
+
+	.restore-btn {
+		flex-shrink: 0;
+		padding: 10rpx 28rpx;
+		border-radius: 30rpx;
+		background: #ecf5ff;
+		color: #409eff;
+		font-size: 24rpx;
+
+		&:active {
+			opacity: 0.8;
+		}
+	}
+
 	.course-bar {
 		width: 10rpx;
 		height: 64rpx;
@@ -263,6 +321,10 @@ const courseList = computed(() => {
 
 			&.tag-conflict {
 				background: #f56c6c;
+			}
+
+			&.tag-cancel {
+				background: #c0c4cc;
 			}
 		}
 
