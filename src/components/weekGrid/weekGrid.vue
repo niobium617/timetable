@@ -137,10 +137,13 @@ const sections = computed(() => data.config.sections || []);
  * （如 10 小节）时，挪到下半屏的格子就必然「未移动」，正是"单双周挪不动"的真凶
  * 之一，故已废弃。MP 端 scroll-view 原生跟随滚动；H5 端长按会阻止浏览器原生
  * 滚动，拖动中滚不到视口外是 H5 的已知限制（次要端，可用编辑调整）。
+ *
+ * 刻意**不用 ref**：只有拖动换算读它，模板里一处都不读；用 ref 只是让小程序端
+ * 每滚一帧都多一次没人要的 setData。
  */
-const scrollTop = ref(0);
+let scrollTop = 0;
 function onGridScroll(e) {
-	scrollTop.value = (e.detail && e.detail.scrollTop) || 0;
+	scrollTop = (e.detail && e.detail.scrollTop) || 0;
 }
 
 /**
@@ -324,6 +327,29 @@ function onSlotLongpress(item, idx, e) {
 }
 
 /**
+ * 拖动中的跟手更新**每帧最多发一次**。
+ * 一帧里 touchmove 可能来好几次（安卓上尤其密），每次都发就是几次跨线程通信加几次
+ * 渲染，而人眼只关心这一帧最后落在哪；后到的位置留到帧末补发，一次都不丢。
+ */
+const MOVE_FRAME_MS = 16;
+let lastMoveAt = 0;
+let pendingMove = null;
+let moveTimer = null;
+
+function emitMove(p) {
+	lastMoveAt = Date.now();
+	emit('dragMove', p, scrollTop - (props.drag.scrollTop0 || 0));
+}
+
+function flushMove() {
+	moveTimer = null;
+	if (!pendingMove) return;
+	const p = pendingMove;
+	pendingMove = null;
+	emitMove(p);
+}
+
+/**
  * 拖动中。刻意**不** .stop：让 touchmove 继续冒泡给分页器和 scroll-view，
  * 页面按手指位置算落点、按滚动量补差（见上面 scrollTop 的注释）。
  */
@@ -331,7 +357,13 @@ function onSlotTouchMove(e) {
 	if (!props.drag || !props.drag.active) return;
 	const p = pointOf(e);
 	if (!p) return;
-	emit('dragMove', p, scrollTop.value - (props.drag.scrollTop0 || 0));
+	if (Date.now() - lastMoveAt >= MOVE_FRAME_MS) {
+		pendingMove = null;
+		emitMove(p);
+		return;
+	}
+	pendingMove = p;
+	if (!moveTimer) moveTimer = setTimeout(flushMove, MOVE_FRAME_MS);
 }
 
 function onSlotTouchEnd() {
@@ -340,6 +372,12 @@ function onSlotTouchEnd() {
 	if (!longPressed && !(props.drag && props.drag.active)) return;
 	longPressed = false;
 	suppressClick = true;
+	// 松手前把这一帧里最后那个位置补发出去：落点就是按它算的
+	if (moveTimer) {
+		clearTimeout(moveTimer);
+		moveTimer = null;
+	}
+	flushMove();
 	emit('dragEnd');
 }
 
@@ -396,6 +434,7 @@ onMounted(() => {
 
 onUnmounted(() => {
 	if (timer) clearInterval(timer);
+	if (moveTimer) clearTimeout(moveTimer);
 });
 
 watch(() => props.weekDates, updateNowLine);

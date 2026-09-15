@@ -54,20 +54,14 @@
 			</view>
 		</view>
 
+		<!-- 浮动卡片（抽成组件：位置每帧都变，别拖着整页一起重渲染） -->
+		<drag-ghost v-if="drag.active" :drag="drag" />
+
 		<!--
-			拖动覆盖层：**纯视觉**，不接受任何触摸（pointer-events: none）。
-			拖动是手指不离开屏幕一气呵成的——touchmove 由源卡片（weekGrid 的
-			.course-slot）接收后冒泡上来的，跟覆盖层无关；覆盖层只管画浮动卡片。
-			渲染在分页器之外：track 用 transform 平移，fixed 子元素会被当成
-			相对定位。
+			贴边翻页提示：贴住屏幕左/右边缘时从中间往上下涨起来，涨满（约 0.15s）即翻页。
+			只在"确实还有相邻周可翻"的一侧显示。
 		-->
-		<view v-if="drag.active" class="drag-overlay">
-			<view class="drag-ghost" :style="ghostStyle">
-				<text class="ghost-name">{{ drag.course && drag.course.name }}</text>
-				<text v-if="drag.course && drag.course.classroom" class="ghost-room">{{ drag.course.classroom }}</text>
-				<text class="ghost-hint">松手放到高亮格</text>
-			</view>
-		</view>
+		<view class="edge-hint" :class="{ 'is-on': edgeHintDir !== 0, 'is-right': edgeHintDir === 1 }"></view>
 
 		<!-- 回到本周 -->
 		<view v-if="pageIndex + 1 !== currentWeekNum" class="back-week" @click="backToThisWeek">
@@ -114,6 +108,7 @@ import { getWeekInfo, getWeekDates } from '../../utils/week.js';
 import { parseWeeksPattern } from '../../utils/weeksPattern.js';
 import { todayStr, formatMDShort, WEEKDAY_NAMES } from '../../utils/time.js';
 import weekGrid from '../../components/weekGrid/weekGrid.vue';
+import dragGhost from '../../components/dragGhost/dragGhost.vue';
 import courseEdit from '../../components/courseEdit/courseEdit.vue';
 
 const {
@@ -208,6 +203,7 @@ const PAN_SLOP = 8; // 低于这个位移不判定方向（点按/长按不算�
 const PAN_FLICK_MS = 260; // 快速轻扫
 const PAN_FLICK_DX = 30;
 const PAN_RATIO = 0.22; // 或被拖过页面宽度的这个比例 → 翻页
+const PAGE_DOCK_MS = 260; // 松手后停靠到整页位置的动画时长
 
 function pageWidth() {
 	const info = (uni.getWindowInfo ? uni.getWindowInfo() : uni.getSystemInfoSync()) || {};
@@ -215,14 +211,18 @@ function pageWidth() {
 }
 
 /**
- * 画布位移。拖动课程期间 transition 必须为 none：
- * 贴边翻页是瞬时切换的，动画会让落点列失去准头（见 updateEdgeFlip）。
+ * 画布位移。
+ *
+ * 拖动课程期间默认没有 transition（跟手位移与贴边翻页都是瞬时改 pageIndex，
+ * 动画期间手指相对内容会漂）。例外是贴边翻页这一拍：edgeAnim 置位的那 200ms
+ * 让它平滑滑过去——各周页面几何完全一致，页面停在哪儿都不影响"手指 x → 第几列"
+ * 的换算（cellRects 是长按那一刻的快照，本来就是当前页坐标系）。
  */
 const trackStyle = computed(() => ({
 	transform: `translateX(calc(${-pageIndex.value * 100}% + ${pan.dx}px))`,
-	transition: pan.axis === 'x' || drag.active
+	transition: pan.axis === 'x' || (drag.active && !edgeAnim.value)
 		? 'none'
-		: 'transform 260ms cubic-bezier(0.25, 0.8, 0.35, 1)',
+		: `transform ${edgeAnim.value ? EDGE_ANIM_MS : PAGE_DOCK_MS}ms cubic-bezier(0.25, 0.8, 0.35, 1)`,
 }));
 
 function onPagerTouchStart(e) {
@@ -434,14 +434,6 @@ const drag = reactive({
 	scrollTop0: 0,
 });
 
-const ghostStyle = computed(() => ({
-	left: `${drag.x}px`,
-	top: `${drag.y}px`,
-	width: `${drag.w}px`,
-	height: `${drag.h}px`,
-	backgroundColor: (drag.course && drag.course.color) || '#409eff',
-}));
-
 /** 课程节次跨度（拖动只改位置，不改变跨度） */
 const dragSpan = computed(() =>
 	drag.course ? drag.course.endSection - drag.course.startSection + 1 : 1
@@ -500,7 +492,7 @@ function onDragStart(payload) {
 	drag.fromCol = payload.col;
 	drag.w = payload.slotRect.width;
 	drag.h = payload.slotRect.height;
-	// 浮动卡片出现在源卡片原位（覆盖层与 rect 同坐标系，见 .drag-overlay 的样式注释）
+	// 浮动卡片出现在源卡片原位（覆盖层与 rect 同坐标系，见 dragGhost.vue 里 .drag-overlay 的注释）
 	drag.x = payload.slotRect.left;
 	drag.y = payload.slotRect.top;
 	// 手指相对卡片左上角的偏移：按它就位，浮动卡片原地等手指继续拖，不会突然跳到指尖下
@@ -527,7 +519,8 @@ function onDragStart(payload) {
 	pan.axis = '';
 	pan.dx = 0;
 	clearEdgeFlip();
-	uni.showToast({ title: '拖到目标格后松手', icon: 'none', duration: 1500 });
+	// 刻意不弹「拖到目标格后松手」这类 toast：浮动卡片自带"松手放到高亮格"，
+	// 再弹一个正压在屏幕中央的提示，既挡视线又在真机上多一层浮层开销。
 }
 
 /**
@@ -560,19 +553,43 @@ function onDragEnd() {
 /* ---------- 拖动中的翻页：贴着左右边缘悬停一会儿 → 翻到相邻周 ---------- */
 
 const EDGE_X = 16; // 距「屏幕」边缘多少 px 算贴边（按浮动卡片中心）
-const EDGE_ENTER_MS = 250; // 第一次贴边等这么久就翻（太久不跟手、太短容易误触）
-const EDGE_REPEAT_MS = 450; // 继续贴着：一拍一拍往后翻
-let edgeDir = 0;
+const EDGE_EXIT_X = 26; // 迟滞：贴住之后要退到这么远才算离开边缘
+const EDGE_HOLD_MS = 150; // 贴边悬停这么久就翻（再慢就像卡住了）
+const EDGE_ANIM_MS = 200; // 翻页动画时长（edgeAnim 置位期间画布才走过渡）
+let edgeDir = 0; // 当前贴住的一侧（0 = 不在贴边区）
+let edgeFired = false; // 这一侧已经翻过：手指不退出去就不再翻
 let edgeTimer = null;
+let edgeAnimTimer = null;
+const edgeAnim = ref(false); // 贴边翻页这一拍：允许画布走过渡动画
+const edgeHintDir = ref(0); // 边缘提示条显示在哪一侧（0 = 不显示）
+
+/** 相邻周存不存在（首/末周没有可翻的方向） */
+function canFlip(dir) {
+	const next = pageIndex.value + dir;
+	return next >= 0 && next < pages.value.length;
+}
+
+/** 翻页动画：置位 edgeAnim 让画布走过渡，动画结束再收回（这期间没有手指跟手） */
+function playEdgeAnim() {
+	edgeAnim.value = true;
+	if (edgeAnimTimer) clearTimeout(edgeAnimTimer);
+	edgeAnimTimer = setTimeout(() => {
+		edgeAnimTimer = null;
+		edgeAnim.value = false;
+	}, EDGE_ANIM_MS + 60);
+}
 
 /**
- * 拖动期间翻页不用跟手（手指相对内容就不动了），改用贴边悬停，且**瞬时切换**：
- * 每周页面几何完全一致，页面停在整页位置上，"手指 x → 第几列"的换算才始终精确。
- * 换页后源卡片的矩形依然有效，落点判定完全不受影响。
+ * 拖动期间翻页不用跟手（手指相对内容就不动了），改用贴边悬停一下翻一页，
+ * 就像挪 App 图标时把图标拖到屏幕边缘。
+ *
+ * **一次悬停只翻一页**（edgeFired）：翻页本身要 200ms，手指还贴在同一侧时若接着
+ * 翻第二页，观感就是"停不下来、一路滑过去"（真机实测反馈）。想连翻就把手指退出
+ * 边缘再贴回来——退出要超过 EDGE_EXIT_X 才算数（迟滞），免得在边界上抖动时反复触发。
  *
  * 翻页区必须贴着**屏幕**边缘（0 / windowWidth），不能用格子的左/右边：
  * 格子的边缘正好在周一/周日列里——按旧算法瞄准周一列悬停半秒就会误翻页，
- * 松手时课就"跑到别的周去了"，整页瞬时横跳也像"别的课自己乱跑"。
+ * 松手时课就"跑到别的周去了"，整页横跳也像"别的课自己乱跑"。
  * 屏幕左边缘 0~16px 落在时间列上（时间列约 44px 宽），贴时间列翻页正合适。
  */
 function updateEdgeFlip() {
@@ -582,30 +599,37 @@ function updateEdgeFlip() {
 	}
 	const winW = pageWidth();
 	const cx = drag.x + drag.w / 2;
-	const dir = cx <= EDGE_X ? -1 : cx >= winW - EDGE_X ? 1 : 0;
-	if (!dir) {
+	let dir = 0;
+	if (cx <= EDGE_X) dir = -1;
+	else if (cx >= winW - EDGE_X) dir = 1;
+	else if (edgeDir === -1 && cx <= EDGE_EXIT_X) dir = -1;
+	else if (edgeDir === 1 && cx >= winW - EDGE_EXIT_X) dir = 1;
+
+	// 没有相邻周可翻时不提示：不给出翻不过去的假希望
+	if (!dir || !canFlip(dir)) {
 		clearEdgeFlip();
 		return;
 	}
 	if (dir !== edgeDir) {
 		edgeDir = dir;
-		armEdgeTimer(EDGE_ENTER_MS); // 首次进入贴边区：短延迟即翻
+		edgeFired = false;
+		edgeHintDir.value = dir; // 提示条开始涨：涨满就翻
+		armEdgeTimer(EDGE_HOLD_MS);
 		return;
 	}
-	if (!edgeTimer) armEdgeTimer(EDGE_REPEAT_MS); // 同一侧持续悬停：翻过一页后等下一拍
+	if (edgeFired || edgeTimer) return;
+	armEdgeTimer(EDGE_HOLD_MS);
 }
 
 function armEdgeTimer(ms) {
 	if (edgeTimer) clearTimeout(edgeTimer);
 	edgeTimer = setTimeout(() => {
 		edgeTimer = null;
-		if (!drag.active) return;
-		const next = pageIndex.value + edgeDir;
-		if (next < 0 || next >= pages.value.length) {
-			edgeDir = 0; // 已经是首/末周：不再翻
-			return;
-		}
-		pageIndex.value = next;
+		if (!drag.active || !edgeDir || edgeFired) return;
+		edgeFired = true;
+		edgeHintDir.value = 0; // 提示条收起：这一页已经翻过去了
+		playEdgeAnim();
+		pageIndex.value += edgeDir;
 	}, ms);
 }
 
@@ -615,6 +639,8 @@ function clearEdgeFlip() {
 		edgeTimer = null;
 	}
 	edgeDir = 0;
+	edgeFired = false;
+	edgeHintDir.value = 0;
 }
 
 /** 由格子矩形换算落点：列按浮动卡片中心，行按手指纵向位移了多少行 */
@@ -880,73 +906,36 @@ onUnmounted(() => {
 	}
 }
 
-/* ---------- 拖动覆盖层 ---------- */
-.drag-overlay {
+/* ---------- 贴边翻页提示 ---------- */
+/*
+ * 贴住屏幕左/右边缘时，从中间往上下涨起来的一条窄条；涨满（EDGE_HOLD_MS）即翻页。
+ * 有它才知道"停在这儿是有用的"——之前贴边之后毫无反馈，看着就像卡住了。
+ */
+.edge-hint {
 	position: fixed;
 	left: 0;
-	top: 0;
-	right: 0;
-	bottom: 0;
-	z-index: 1000;
-	background: rgba(31, 45, 61, 0.08);
-	/*
-	 * 纯视觉层：不吃任何触摸。拖动本身靠源卡片那条 touch 序列（触摸目标在
-	 * touchstart 就定了，覆盖层挡不住它），分页器的翻周手势也照常透过去。
-	 */
+	top: 50%;
+	width: 8rpx;
+	height: 40vh;
+	margin-top: -20vh;
+	border-radius: 0 8rpx 8rpx 0;
+	background: rgba(64, 158, 255, 0.9);
+	box-shadow: 0 0 12rpx rgba(64, 158, 255, 0.6);
+	/* 涨起来 = 从中间往两端长；收起时同样缩回去 */
+	transform: scaleY(0);
+	transform-origin: center center;
+	transition: transform 150ms linear;
 	pointer-events: none;
-	touch-action: none;
+	z-index: 1001;
 
-	/*
-	 * H5：对齐到「页面内容区」原点。
-	 * uni-h5 会把选择器 rect 与触摸点一起减去窗口顶栏高度（--window-top，即原生
-	 * 导航栏），而 position: fixed 仍以视口为原点 —— 不加这一句，浮动卡片会比
-	 * 手指高出一个导航栏（实测 44px ≈ 一行），落点行的判定也跟着偏。小程序端
-	 * rect、触摸点、fixed 定位三者本就同为视口坐标，故仅在 H5 端补偿。
-	 */
-	/* #ifdef H5 */
-	top: var(--window-top, 0px);
-	/* #endif */
-}
-
-.drag-ghost {
-	position: absolute;
-	border-radius: 10rpx;
-	padding: 8rpx 10rpx;
-	box-sizing: border-box;
-	display: flex;
-	flex-direction: column;
-	overflow: hidden;
-	box-shadow: 0 16rpx 40rpx rgba(0, 0, 0, 0.32);
-	transform: scale(1.05);
-	opacity: 0.96;
-
-	.ghost-name {
-		font-size: 24rpx;
-		font-weight: 600;
-		color: #ffffff;
-		line-height: 1.25;
-		overflow: hidden;
+	&.is-on {
+		transform: scaleY(1);
 	}
 
-	.ghost-room {
-		margin-top: 4rpx;
-		font-size: 20rpx;
-		color: rgba(255, 255, 255, 0.88);
-		overflow: hidden;
-		white-space: nowrap;
-		text-overflow: ellipsis;
-	}
-
-	.ghost-hint {
-		position: absolute;
-		left: 0;
+	&.is-right {
+		left: auto;
 		right: 0;
-		bottom: 0;
-		font-size: 18rpx;
-		text-align: center;
-		color: rgba(255, 255, 255, 0.92);
-		background: rgba(0, 0, 0, 0.28);
-		padding: 2rpx 0;
+		border-radius: 8rpx 0 0 8rpx;
 	}
 }
 
