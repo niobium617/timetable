@@ -53,6 +53,7 @@
 						:class="{ 'is-drag-source': isDragSource(item) }"
 						:style="{ top: item.top, left: item.left, width: item.width, height: item.height }"
 						@longpress="onSlotLongpress(item, idx, $event)"
+						@touchstart="onSlotTouchStart"
 						@touchmove="onSlotTouchMove($event)"
 						@touchend="onSlotTouchEnd"
 						@touchcancel="onSlotTouchCancel"
@@ -142,8 +143,22 @@ function onGridScroll(e) {
 	scrollTop.value = (e.detail && e.detail.scrollTop) || 0;
 }
 
-/** 拖动松手后浏览器会补发 click，这段时间内忽略，避免拖完弹出编辑框 */
-let suppressClickUntil = 0;
+/**
+ * 拖动松手后浏览器会补发 click（同一次触摸序列的最后一步），必须丢掉，否则拖完
+ * 放下会顺手弹出编辑框。
+ *
+ * 判据是"抑制到下一次按下为止"而不是固定时长：主线程忙时补发的 click 可能晚于任何
+ * 固定窗口（e2e 用 20 倍 CPU 降速稳定复现），早解除就会莫名弹出编辑框。合成的
+ * click 之前必定没有新的 touchstart，所以下一次 touchstart 才是可靠的解除时机。
+ */
+let suppressClick = false;
+
+/**
+ * 本组触摸是否已触发长按。
+ * 页面进入拖动状态要等异步的几何查询返回，这中间手指可能已经抬起——不能因为
+ * "还没 active" 就把那次 touchend 丢掉（事件已发生，不会再补发）。
+ */
+let longPressed = false;
 
 /** 与 uni.scss 中 $tt-row-height 保持一致（rpx） */
 const ROW_H = 92;
@@ -267,6 +282,9 @@ function pointOf(e) {
  * 源卡片并冒泡到这里（见下面三个处理函数），所以能直接接着拖。
  */
 function onSlotLongpress(item, idx, e) {
+	// 本组触摸已触发长按：手指抬起时即使页面还没进入拖动状态（几何查询未返回）
+	// 也必须通知它，否则那次拖动会永远收不到 dragEnd（见 onSlotTouchEnd）。
+	longPressed = true;
 	// **同步**通知页面「拖动即将开始」：几何查询是异步的，查询回来前页面不能
 	// 把手指的移动当翻周手势处理（移动优先级最高），否则会出现"先横移了一截再
 	// 被拉回"的跳页观感。
@@ -317,16 +335,24 @@ function onSlotTouchMove(e) {
 }
 
 function onSlotTouchEnd() {
-	if (!props.drag || !props.drag.active) return;
-	// 浏览器/小程序在 touchend 后会补发 click：拖完松手不能顺手弹出编辑框
-	suppressClickUntil = Date.now() + 400;
+	// 也认 longPressed：长按后立刻松手时几何查询可能还没回来（页面仍是 pending），
+	// 此时漏发 dragEnd 会让页面永远停在拖动状态——翻页与卡片点击就此彻底失效。
+	if (!longPressed && !(props.drag && props.drag.active)) return;
+	longPressed = false;
+	suppressClick = true;
 	emit('dragEnd');
 }
 
 function onSlotTouchCancel() {
-	if (!props.drag || !props.drag.active) return;
-	suppressClickUntil = Date.now() + 400;
+	if (!longPressed && !(props.drag && props.drag.active)) return;
+	longPressed = false;
+	suppressClick = true;
 	emit('dragCancel');
+}
+
+/** 新的按下 = 新的意图：解除上一条触摸序列留下的 click 抑制 */
+function onSlotTouchStart() {
+	suppressClick = false;
 }
 
 /**
@@ -335,7 +361,7 @@ function onSlotTouchCancel() {
  */
 function onCourseCardClick(item) {
 	if (props.drag && props.drag.active) return;
-	if (Date.now() < suppressClickUntil) return;
+	if (suppressClick) return;
 	emit('courseClick', item.course, item.date);
 }
 

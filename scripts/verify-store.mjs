@@ -213,6 +213,66 @@ assert(!!find('o1'), '替代型一次性课保留（不是取消记录，属真�
 reset();
 assert(api.deleteCourse('nope') === false, '删除不存在的课程返回 false');
 
+console.log('== 一次性课去重 / 拆分与取消记录的联动 ==');
+/** 第 n 教学周的第 offset 天（0=周一） */
+function weekDate(n, offset) {
+	const d = new Date(2026, 7, 31 + (n - 1) * 7 + offset);
+	const p = (x) => String(x).padStart(2, '0');
+	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// 同 (date, overrideId) 的替代课只保留一条（拖动中间步骤容易撞上），后者就地覆盖前者
+reset();
+api.addCourse({ name: '高数（换教室）', weekday: 1, startSection: 1, endSection: 4, weeks: 'all', date: d1, overrideId: 'w1' });
+api.addCourse({ name: '高数（再换）', weekday: 1, startSection: 3, endSection: 4, weeks: 'all', date: d1, overrideId: 'w1' });
+const dupes = data.courses.filter((c) => c.date === d1 && c.overrideId === 'w1' && !c.cancelled);
+assert(dupes.length === 1, '同日期同原课的替代课不重复新增');
+assert(dupes[0].name === '高数（再换）' && dupes[0].startSection === 3, '重复新增时就地更新为最新内容');
+
+// 取消记录不受去重规则影响（同日可同时存在取消记录与替代课，语义不同）
+reset();
+api.cancelCourseOnDate('w1', d1);
+api.addCourse({ name: '高数（补课）', weekday: 1, startSection: 1, endSection: 4, weeks: 'all', date: d1, overrideId: 'w1' });
+assert(data.courses.filter((c) => c.date === d1).length === 1, '新替代课顶掉同日取消记录（不再留幽灵「已取消」行）');
+
+// 节次拆分：两条取消记录各自收窄到自己那段的节次
+reset();
+api.cancelCourseOnDate('w1', d1);
+api.deleteCourseSections('w1', 2, 3);
+const leftRef = data.courses.find((c) => c.cancelled && c.overrideId === 'w1');
+const rightRef = data.courses.find((c) => c.cancelled && c.overrideId !== 'w1');
+assert(leftRef.endSection === 1 && leftRef.startSection === 1, '左段取消记录收窄为左段节次');
+assert(rightRef.startSection === 4 && rightRef.endSection === 4, '右段取消记录收窄为右段节次');
+
+// 周段拆分：落在新周段内的取消记录改指新课程，段外仍指原课
+reset();
+const cancelInRange = weekDate(4, 2); // 第 4 周周三（w2 在第 4 周有课）
+const cancelOutRange = weekDate(3, 2); // 第 3 周周三
+api.cancelCourseOnDate('w2', cancelInRange);
+api.cancelCourseOnDate('w2', cancelOutRange);
+api.splitCourseRange('w2', { name: '体育（换了老师）' }, 4, 6);
+const segCourse = data.courses.find((c) => c.name === '体育（换了老师）');
+assert(!!segCourse && segCourse.weeks === '4-6', '拆出新课占用所选周段');
+assert(find('w2').weeks === '2-3,7-8', '原课收窄为剩余周次');
+assert(
+	data.courses.find((c) => c.cancelled && c.date === cancelInRange).overrideId === segCourse.id,
+	'段内取消记录改指新课程（取消不会被无声撤销）'
+);
+assert(
+	data.courses.find((c) => c.cancelled && c.date === cancelOutRange).overrideId === 'w2',
+	'段外取消记录仍指原课'
+);
+
+// 「手动校准教学周」开着时，周段删除的取消记录清理仍按日期所在的实际教学周判断
+reset();
+data.config.manualWeek = 2; // 所有日期的展示周号都被强制为第 2 周
+api.cancelCourseOnDate('w1', weekMonday(2));
+api.cancelCourseOnDate('w1', weekMonday(9));
+api.deleteCourseRange('w1', 1, 4);
+assert(data.courses.filter((c) => c.cancelled).length === 1, '手动周次下仍只清理段内取消记录');
+assert(data.courses.find((c) => c.cancelled).date === weekMonday(9), '保留的是段外那条');
+data.config.manualWeek = null;
+
 // 删除操作写入自动备份（设置页可撤销）
 reset();
 api.deleteCourseSections('w1', 2, 3);

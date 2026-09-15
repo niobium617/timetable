@@ -21,7 +21,7 @@ import { mergeCourses } from '../utils/importMatch.js';
 import { isValidWeeksPattern, getWeekInfo } from '../utils/week.js';
 import { getWeekday } from '../utils/time.js';
 import { OFFICIAL_HOLIDAYS, getOfficialYears } from '../utils/officialHolidays.js';
-import { intersectWeeksRange, subtractWeeksRange } from '../utils/weeksPattern.js';
+import { intersectWeeksRange, subtractWeeksRange, isCourseOnWeek } from '../utils/weeksPattern.js';
 
 /** 导入课程自动配色（与 courseEdit 的 COURSE_COLORS 保持一致的色系） */
 const IMPORT_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#8e44ad', '#16a085', '#e84393', '#3498db', '#9c6b3c', '#909399'];
@@ -37,9 +37,35 @@ function save() {
 	return saveData(data);
 }
 
-/** 新增课程（courseData 不含 id 时自动生成） */
+/**
+ * 新增课程（courseData 不含 id 时自动生成）。
+ *
+ * 「仅本次修改」的替代课（一次性课 + overrideId）在同一日期只该有一条——同一门原课
+ * 同一天出现两条替代课没有意义，却会在网格里并排渲染出两张一模一样的卡片（拖动的
+ * 中间步骤很容易撞上）。故同 (date, overrideId) 已有替代课时改为就地更新，并把它返回。
+ * 取消型记录（cancelled）是抑制标记而非内容，不参与这条规则。
+ */
 export function addCourse(courseData) {
 	const course = { ...courseData };
+	if (course.date && course.overrideId != null && !course.cancelled) {
+		// 同一日期同一原课：已有的取消记录被这条替代课顶掉。取消记录只是抑制标记，
+		// 而替代课本身就抑制原课当天显示；留着它会在日历当日弹窗多出一行「已取消」，
+		// 点「恢复」还什么都恢复不出来（那天显示的已经是替代课）。
+		for (let i = data.courses.length - 1; i >= 0; i--) {
+			const c = data.courses[i];
+			if (c.cancelled && c.date === course.date && c.overrideId === course.overrideId) {
+				data.courses.splice(i, 1);
+			}
+		}
+		const dup = data.courses.find(
+			(c) => c.date === course.date && c.overrideId === course.overrideId && !c.cancelled
+		);
+		if (dup) {
+			const { id: _ignored, ...patch } = course;
+			updateCourse(dup.id, patch);
+			return data.courses.find((c) => c.id === dup.id);
+		}
+	}
 	if (!course.id) course.id = genId();
 	data.courses.push(course);
 	save();
@@ -196,7 +222,16 @@ export function splitCourseRange(originalId, patch, start, end) {
 
 	if (remainderWeeks) {
 		updateCourse(originalId, { weeks: remainderWeeks });
-		addCourse({ ...patch, weeks: rangeWeeks });
+		const seg = addCourse({ ...patch, weeks: rangeWeeks });
+		// 取消记录跟着日期走：日期落在新拆出的周段里的，改指新课程
+		// （那天的那节课现在属于新段）。不改指的话取消会被无声撤销——那天又冒出课来，
+		// 还多出一行点不动的「已取消」。段外的记录仍指向原课，继续正常抑制。
+		data.courses
+			.filter((c) => c.cancelled && c.overrideId === originalId)
+			.forEach((ref) => {
+				const w = getWeekInfo(ref.date, data.config).weekNum;
+				if (isCourseOnWeek(seg, w)) updateCourse(ref.id, { overrideId: seg.id });
+			});
 		return { ok: true, remainder: true };
 	}
 	updateCourse(originalId, { ...patch, weeks: rangeWeeks });
@@ -293,7 +328,9 @@ export function deleteCourseRange(id, start, end) {
 		.filter((c) => {
 			if (!c.cancelled || c.overrideId !== id || !c.date) return false;
 			if (!remainderWeeks) return true;
-			const w = getWeekInfo(c.date, data.config).weekNum;
+			// 用 autoWeek（日期所在的实际教学周）而非 weekNum：设置页开着「手动校准
+			// 教学周」时 weekNum 对所有日期都返回同一个值，周段判断会退化成"全删"或"全留"。
+			const w = getWeekInfo(c.date, data.config).autoWeek;
 			return w >= lo && w <= hi;
 		})
 		.map((c) => c.id);
@@ -345,7 +382,10 @@ export function deleteCourseSections(id, dStart, dEnd) {
 		const created = addCourse({ ...rest, startSection: rightStart, endSection: ce });
 		refs.forEach((ref) => {
 			const { id: _refId, ...refRest } = ref;
-			addCourse({ ...refRest, overrideId: created.id });
+			// 节次同步收窄到各自那一段：否则两条记录（都还带着原课的完整节次）在日历
+			// 当日弹窗里显示得一模一样，用户分不清该点哪个「恢复」，点一个也恢复不齐。
+			updateCourse(ref.id, { endSection: leftEnd });
+			addCourse({ ...refRest, startSection: rightStart, endSection: ce, overrideId: created.id });
 		});
 		return { ok: true, split: true, deleted: false, newId: created.id };
 	}

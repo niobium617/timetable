@@ -447,6 +447,13 @@ const dragSpan = computed(() =>
 	drag.course ? drag.course.endSection - drag.course.startSection + 1 : 1
 );
 
+/**
+ * 长按后、几何查询返回前手指就抬起了（或触摸被打断）：这次拖动作废。
+ * 查询是异步的，回来时手势早已结束——若照样进入拖动状态，就再没有 touchend
+ * 来结束它（见 onDragStart）。onDragBegin 每次都复位。
+ */
+let dragAborted = false;
+
 /** 长按已发生、dragStart 还没到（几何查询是异步的）期间的兜底清理 */
 let pendingTimer = null;
 function clearPending() {
@@ -466,6 +473,7 @@ function clearPending() {
 function onDragBegin() {
 	if (drag.active) return;
 	clearPending(); // 先清掉上一个兜底定时器，再置位（顺序不能反，clearPending 会复位 pending）
+	dragAborted = false;
 	drag.pending = true;
 	pan.axis = '';
 	pan.dx = 0;
@@ -478,6 +486,13 @@ function onDragBegin() {
 
 function onDragStart(payload) {
 	clearPending();
+	// 这次长按的手势已经结束了（手指在几何查询返回前就抬起了）：作废。
+	// 若照样进入拖动状态，就再也没有 touchend 来结束它——拖动状态永远为真，
+	// 翻页手势与卡片点击会全部失效，只有重载能恢复。
+	if (dragAborted) {
+		dragAborted = false;
+		return;
+	}
 	if (!payload || !payload.slotRect || !payload.cellRects.length) return;
 	drag.active = true;
 	drag.course = payload.course;
@@ -532,7 +547,13 @@ function onDragMove(p, scrollDelta) {
 }
 
 function onDragEnd() {
-	if (!drag.active) return;
+	// 手指在几何查询返回前抬起：本组触摸已经结束，不会再来的 touchmove 能救它，
+	// 直接作废（onDragStart 回来时看到标记即放弃）
+	if (!drag.active) {
+		dragAborted = true;
+		clearPending();
+		return;
+	}
 	commitDrag();
 }
 
@@ -655,7 +676,10 @@ function commitDrag() {
 	// 单双周课在下一周本来就没有这节，落下去是"挪到那一周"，不是没动。
 	const sameDate = targetDate === (c.date || drag.date);
 	if (sameCol && startSection === c.startSection && sameDate) {
-		resetDrag(); // 同一天原位落下：视为取消
+		// 同一天原位落下：这次拖动作废（不是删除）。出声——整段手势做完总得有个交代，
+		// 否则用户分不清"本来就没动"和"拖动没生效"。
+		uni.showToast({ title: '课未移动', icon: 'none', duration: 1500 });
+		resetDrag();
 		return;
 	}
 	// 同列只改节次：保留原 weekday（调休周该列 ≠ 课程 weekday）
@@ -713,6 +737,8 @@ function resetDrag() {
 	drag.grab = null;
 	drag.target = null;
 	drag.cellRects = [];
+	// 触摸被打断（touchcancel）时几何查询可能还在路上：它回来不得再进入拖动状态
+	dragAborted = true;
 	clearPending();
 	clearEdgeFlip();
 }
